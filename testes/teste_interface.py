@@ -90,7 +90,7 @@ def main() -> None:
     with mock.patch("pygame.mouse.get_pos", return_value=ponto):
         nome = g.nome_sob_mouse()
         g.desenhar()
-    assert nome in (f"NPC {n.id + 1}", f"Corpo do NPC {n.id + 1}"), nome
+    assert nome in (n.nome, f"Corpo de {n.nome}"), nome
     print(f"ok  barra de baixo: tempo + nome sob o mouse ('{nome}')")
 
     # --- Botões de velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x

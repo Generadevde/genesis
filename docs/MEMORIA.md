@@ -6,7 +6,8 @@ macieira e a água; quando fica com fome (ou sede), volta lá.
 ## Regras definidas pelo dono do projeto
 
 - **Aprende só onde usou**:
-  - a **macieira** de onde caiu a maçã que ele **comeu**;
+  - a **macieira** de onde caiu a maçã que ele **comeu** — ou que ele
+    **pegou para carregar** (desde 14/11/2026, ver [CARREGAR.md](CARREGAR.md));
   - a **célula de água** onde ele **bebeu**.
 - Lembra **todos** esses lugares.
 - **Nunca esquece.**

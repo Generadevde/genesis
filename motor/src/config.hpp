@@ -52,6 +52,11 @@ inline constexpr double AGUA_INTERVALO_S = 3.0;
 
 // --- Quantidades iniciais -------------------------------------------------
 inline constexpr int NUM_NPCS      = 4;
+// Nomes dos NPCs, na ordem (pedido em 14/11/2026; "por enquanto").
+inline constexpr const char* NOMES_NPC[NUM_NPCS] = {"Jhon", "Elton", "Rose",
+                                                    "Sycilia"};
+// Quantas maçãs um NPC consegue carregar.
+inline constexpr int MACAS_CARREGAVEIS = 1;
 inline constexpr int NUM_MACIEIRAS = 6;
 
 // --- Fome -----------------------------------------------------------------

@@ -74,4 +74,4 @@ Rodar os testes:
 
 ## Estado atual (14/11/2026)
 
-Motor 0.4: mundo em 3D — ver [MUNDO_3D.md](MUNDO_3D.md); a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).
+Motor 0.5: nomes e carregar maçã — ver [CARREGAR.md](CARREGAR.md); mundo em 3D — ver [MUNDO_3D.md](MUNDO_3D.md); a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).

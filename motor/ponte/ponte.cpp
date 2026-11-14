@@ -62,7 +62,8 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("COMENDO", EstadoNpc::Comendo)
         .value("MORTO", EstadoNpc::Morto)
         .value("INDO_BEBER", EstadoNpc::IndoBeber)
-        .value("BEBENDO", EstadoNpc::Bebendo);
+        .value("BEBENDO", EstadoNpc::Bebendo)
+        .value("INDO_PEGAR", EstadoNpc::IndoPegar);
 
     py::class_<Macieira>(m, "Macieira")
         .def_readonly("pos", &Macieira::pos)
@@ -70,6 +71,9 @@ PYBIND11_MODULE(genesis_motor, m) {
 
     py::class_<Npc>(m, "Npc")
         .def_readonly("id", &Npc::id)
+        .def_readonly("nome", &Npc::nome)
+        .def_readonly("macas_carregadas", &Npc::macas_carregadas)
+        .def_readonly("comendo_da_mao", &Npc::comendo_da_mao)
         .def_readonly("pos", &Npc::pos)
         .def_readonly("fome", &Npc::fome)
         .def_readonly("sede", &Npc::sede)

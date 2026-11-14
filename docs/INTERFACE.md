@@ -54,7 +54,8 @@ terminal (rich), que foi apagada.
 | Trocar de aba | Clique na aba, ou tecla `I` (Mapa → NPCs → Info) |
 | Menu | Clique em Arquivo; `Esc` fecha |
 
-O painel de um NPC mostra também a **memória** dele (macieiras lembradas e
+O painel de um NPC mostra o **nome**, o que ele está **carregando**
+([CARREGAR.md](CARREGAR.md)) e também a **memória** dele (macieiras lembradas e
 quantos pontos de água), e a aba NPCs tem as colunas "Macieiras lembradas"
 e "Águas lembradas" (ver [MEMORIA.md](MEMORIA.md)).
 

@@ -68,6 +68,7 @@ NOME_ESTADO = {
     EST.MORTO: "morto",
     EST.INDO_BEBER: "indo beber",
     EST.BEBENDO: "bebendo",
+    EST.INDO_PEGAR: "indo pegar maçã",
 }
 
 # Zoom (escolhido pelo dono do projeto): + aproxima, - afasta.
@@ -319,9 +320,18 @@ class Genesis:
         self.tela.set_clip(anterior)
 
     @staticmethod
+    def texto_carregando(n) -> str:
+        """O que o NPC leva na mão (hoje só maçã, no máximo 1)."""
+        if n.macas_carregadas == 0:
+            return "nada"
+        return "1 maçã" if n.macas_carregadas == 1 else f"{n.macas_carregadas} maçãs"
+
+    @staticmethod
     def texto_estado(n) -> str:
         """Estado do NPC; indo a um lugar lembrado ganha "(memória)"."""
         texto = NOME_ESTADO[n.estado]
+        if n.estado == EST.COMENDO and n.comendo_da_mao:
+            return "comendo a maçã que carregava"
         if n.pela_memoria and n.estado in (EST.INDO_COMER, EST.INDO_BEBER):
             texto += " (memória)"
         return texto
@@ -337,8 +347,9 @@ class Genesis:
         return self.simbolos.get(SIMBOLO[cod], lado, cor)
 
     def linhas_tabela(self):
-        return [[f"NPC {n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
+        return [[n.nome, f"{n.fome:.0f}", f"{n.sede:.0f}",
                  self.texto_estado(n), f"({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
+                 self.texto_carregando(n),
                  str(len(n.macieiras_lembradas)), str(len(n.aguas_lembradas))]
                 for n in self.mundo.npcs()]
 
@@ -347,7 +358,7 @@ class Genesis:
         sel = self.selecao[1] if self.selecao and self.selecao[0] == "npc" else None
         self._linhas_rects = win98.tabela(
             self.tela, area.inflate(-2 * A.ESPACO, -2 * A.ESPACO), self.fonte,
-            ["NPC", "Fome", "Sede", "Estado", "Posição",
+            ["NPC", "Fome", "Sede", "Estado", "Posição", "Carregando",
              "Macieiras lembradas", "Águas lembradas"],
             self.linhas_tabela(), selecionada=sel)
 
@@ -359,13 +370,14 @@ class Genesis:
             n = self.mundo.npcs()[self.selecao[1]]
             if n.estado == EST.MORTO:
                 causa = "fome" if n.fome == 0 else "sede"
-                return "✝", A.PRETO, [f"Corpo do NPC {n.id + 1}",
+                return "✝", A.PRETO, [f"Corpo de {n.nome}",
                                       f"Morreu de {causa}",
                                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})"]
-            linhas = [f"NPC {n.id + 1}",
+            linhas = [n.nome,
                       f"Fome: {n.fome:.0f}",
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
+                      f"Carregando: {self.texto_carregando(n)}",
                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
                       "",
                       "Memória:"]
@@ -375,7 +387,7 @@ class Genesis:
                 linhas.append(f"  macieira em ({p.x}, {p.y}, {p.z:+d})")
             if n.aguas_lembradas:
                 linhas.append(f"  água: {len(n.aguas_lembradas)} ponto(s)")
-            if len(linhas) == 7:
+            if not n.macieiras_lembradas and not n.aguas_lembradas:
                 linhas.append("  (nenhum lugar ainda)")
             return "🗿", A.PRETO, linhas
         _, x, y, z = self.selecao
@@ -478,7 +490,7 @@ class Genesis:
         if cod in (int(OC.NPC), int(OC.CORPO)):
             n = self.npc_em(x, y)
             if n:
-                return f"NPC {n.id + 1}" if cod == int(OC.NPC) else f"Corpo do NPC {n.id + 1}"
+                return n.nome if cod == int(OC.NPC) else f"Corpo de {n.nome}"
         if cod == int(OC.MACIEIRA):
             return "Macieira"
         if cod == int(OC.MACA):

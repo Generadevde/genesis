@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.4.1: mundo em 3D com neve (docs/MUNDO_3D.md).
-    return "Genesis — motor 0.4.1 (mundo 3D, neve)";
+    // Versão 0.5: nomes e carregar maçã (docs/CARREGAR.md).
+    return "Genesis — motor 0.5 (nomes, carregar)";
 }
 
 }  // namespace genesis

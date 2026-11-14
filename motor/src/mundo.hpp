@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <random>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -56,7 +57,8 @@ enum class EstadoNpc : std::uint8_t {
     Comendo,       // parado ao lado da maçã, comendo (10 s)
     Morto,         // fome ou sede chegou a 0; o corpo fica no mapa
     IndoBeber,     // com sede < 50 e viu água: indo até ela
-    Bebendo        // parado ao lado da água, bebendo (10 s)
+    Bebendo,       // parado ao lado da água, bebendo (10 s)
+    IndoPegar      // sem fome, viu uma maçã: indo pegar para carregar
 };
 
 struct Macieira {
@@ -66,6 +68,7 @@ struct Macieira {
 
 struct Npc {
     int id = 0;
+    std::string nome;
     Pos pos;
     Pos anterior;              // de onde veio no último passo
     bool tem_anterior = false; // falso até dar o primeiro passo
@@ -79,6 +82,13 @@ struct Npc {
     Pos alvo;                  // maçã, água ou macieira do alvo atual
     bool tem_alvo = false;
     bool pela_memoria = false; // indo a um lugar lembrado (não visto agora)
+
+    // --- Carregar (pedido em 14/11/2026) ---------------------------------
+    // Vendo uma maçã, mesmo sem fome, ele pega e leva consigo. Carrega no
+    // máximo 1. Com fome, come a que está carregando.
+    int macas_carregadas = 0;
+    int origem_carregada = -1;     // macieira de onde veio a maçã na mão
+    bool comendo_da_mao = false;   // está comendo a maçã que carregava
 
     // --- Memória ---------------------------------------------------------
     std::vector<int> macieiras_lembradas;  // índices em Mundo::macieiras()
@@ -140,6 +150,9 @@ private:
     bool procurar_maca(const Npc& n, Pos& achada) const;
     bool procurar_agua(const Npc& n, Pos& achada) const;
     bool tentar_comer(Npc& n);
+    bool tentar_pegar(Npc& n);
+    void lembrar_macieira(Npc& n, int arvore);
+    bool soltar_maca_perto(Pos onde, int origem);
     bool tentar_beber(Npc& n);
     void passo_em_direcao(Npc& n, Pos alvo);
     bool ir_a_macieira_lembrada(Npc& n);

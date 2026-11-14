@@ -240,17 +240,18 @@ def teste_geral(sementes=50, duracao=3600):
 
 
 def teste_memoria(sementes=50, duracao=1800):
-    """Memória: lembra só onde usou, nunca esquece, e usa o que lembra."""
+    """Memória: lembra só onde usou (comeu, bebeu, ou pegou a maçã),
+    nunca esquece, e usa o que lembra."""
     viu_ida_arvore = viu_ida_agua = 0
     for s in range(sementes):
         w = gm.Mundo(20000 + s)
         arvores = [m.pos for m in w.macieiras()]
         antes = {n.id: (len(n.macieiras_lembradas), len(n.aguas_lembradas),
-                        n.estado) for n in w.npcs()}
+                        n.estado, n.macas_carregadas) for n in w.npcs()}
         for _ in range(duracao):
             w.avancar(1.0)
             for n in w.npcs():
-                na, nag, est0 = antes[n.id]
+                na, nag, est0, c0 = antes[n.id]
                 ml, al = n.macieiras_lembradas, n.aguas_lembradas
                 # Nunca esquece: as listas só crescem.
                 assert len(ml) >= na and len(al) >= nag
@@ -263,7 +264,9 @@ def teste_memoria(sementes=50, duracao=1800):
                 # Só aprende onde usou: macieira nova só depois de comer,
                 # água nova só depois de beber.
                 if len(ml) > na:
-                    assert est0 == E.COMENDO  # terminou de comer (pode já ter começado outra)
+                    # aprende ao terminar de comer (maçã do chão) ou ao pegar
+                    # uma maçã para carregar
+                    assert est0 == E.COMENDO or n.macas_carregadas > c0
                 if len(al) > nag:
                     assert est0 == E.BEBENDO  # terminou de beber (pode já ter começado outro gole)
                 # Indo por memória: o alvo é um lugar lembrado.
@@ -274,7 +277,7 @@ def teste_memoria(sementes=50, duracao=1800):
                 if n.pela_memoria and n.estado == E.INDO_BEBER:
                     assert any(p.x == n.alvo.x and p.y == n.alvo.y for p in al)
                     viu_ida_agua += 1
-                antes[n.id] = (len(ml), len(al), n.estado)
+                antes[n.id] = (len(ml), len(al), n.estado, n.macas_carregadas)
     # Com o relevo, quem bebe fica perto do mar e continua vendo a água;
     # por isso a ida à água lembrada pode não acontecer nestas ilhas.
     assert viu_ida_arvore > 0
@@ -346,6 +349,51 @@ def teste_agua():
           f"(níveis {sorted(f for f in fundo if f)}), total conservado; mar estável")
 
 
+def teste_carregar(sementes=60, duracao=1800):
+    """Nomes; pegar maçã sem fome; carrega no máximo 1; com fome come a da
+    mão; lembra a macieira ao pegar; morrendo, a maçã cai ao lado."""
+    w = gm.Mundo(1)
+    assert [n.nome for n in w.npcs()] == ["Jhon", "Elton", "Rose", "Sycilia"]
+    pegou = comeu_da_mao = soltou = 0
+    for s in range(sementes):
+        w = gm.Mundo(40000 + s)
+        arvores = [m.pos for m in w.macieiras()]
+        antes = {n.id: (n.macas_carregadas, n.estado, n.fome, n.pos,
+                        list(n.macieiras_lembradas)) for n in w.npcs()}
+        chao_antes = len(w.macas())
+        for _ in range(duracao):
+            w.avancar(1.0)
+            chao = len(w.macas())
+            for n in w.npcs():
+                c0, e0, f0, p0, ml0 = antes[n.id]
+                assert 0 <= n.macas_carregadas <= 1
+                if n.estado == E.INDO_PEGAR:
+                    assert n.macas_carregadas == 0
+                if n.macas_carregadas > c0 and n.estado != E.MORTO:
+                    pegou += 1
+                    # pegou com a mão livre e lembrou a macieira na hora
+                    assert c0 == 0
+                    assert len(n.macieiras_lembradas) >= len(ml0)
+                if n.estado == E.COMENDO and n.comendo_da_mao:
+                    assert n.macas_carregadas == 1
+                if c0 == 1 and n.macas_carregadas == 0 and n.estado != E.MORTO:
+                    comeu_da_mao += 1
+                if c0 == 1 and n.estado == E.MORTO and e0 != E.MORTO:
+                    assert n.macas_carregadas == 0
+                    # a maçã voltou para o chão, perto do corpo
+                    perto = [p for p in w.macas()
+                             if max(abs(p.x - n.pos.x), abs(p.y - n.pos.y)) == 1]
+                    assert perto, "a maçã não caiu ao lado do corpo"
+                    soltou += 1
+                antes[n.id] = (n.macas_carregadas, n.estado, n.fome, n.pos,
+                               list(n.macieiras_lembradas))
+            chao_antes = chao
+    assert pegou > 0 and comeu_da_mao > 0
+    print(f"ok  nomes Jhon/Elton/Rose/Sycilia; pegar e carregar (máx. 1): "
+          f"{pegou} pegadas, {comeu_da_mao} comidas da mão, "
+          f"{soltou} soltas ao morrer")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_inicio()
@@ -354,6 +402,7 @@ if __name__ == "__main__":
     teste_morte_sem_nada()
     teste_acoes()
     teste_memoria()
+    teste_carregar()
     teste_relevo_npc()
     teste_agua()
     teste_geral()
