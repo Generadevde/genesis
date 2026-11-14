@@ -23,7 +23,7 @@ macieira e a água; quando fica com fome (ou sede), volta lá.
 | Saber de qual árvore veio a maçã | `Mundo::evento_queda_maca` | Cada célula com maçã guarda o número da macieira de onde ela caiu (`origem_maca_`). |
 | Aprender a macieira | `Mundo::evento_fim_comer` | Ao terminar de comer, adiciona a macieira de origem em `macieiras_lembradas` (sem repetir). |
 | Aprender a água | `Mundo::evento_fim_beber` | Ao terminar de beber, adiciona a célula de água em `aguas_lembradas` (sem repetir). |
-| Nunca esquecer | — | Nada no código apaga essas listas. |
+| Nunca esquecer | — | Nada no código apaga essas listas, exceto `ir_a_macieira_lembrada` ao chegar numa macieira que já sumiu (ver VIDA_VEGETAL.md). |
 | Ver vem antes de lembrar | `tentar_comer` / `tentar_beber` | Primeiro procura maçã/água na área 32 × 32. Só se não vir nada usa a memória. |
 | Voltar à macieira | `Mundo::ir_a_macieira_lembrada` | Vai para a macieira lembrada mais próxima, um passo por segundo. |
 | Sem maçã → outra | `Mundo::ir_a_macieira_lembrada` | Chegou ao lado da árvore e não vê maçã: marca como "vista vazia" e escolhe a próxima lembrada mais próxima. Ao comer, a lista de vazias é zerada. |
