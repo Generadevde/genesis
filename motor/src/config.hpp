@@ -10,11 +10,11 @@
 namespace genesis::config {
 
 // --- Mapa -----------------------------------------------------------------
-// Mapa quadrado de 512 x 512 células.
-inline constexpr int LARGURA = 512;
-inline constexpr int ALTURA  = 512;
-// Água: 48 células a partir de cada borda. Depois começa a terra (grama).
-inline constexpr int BORDA_AGUA = 48;
+// Mapa quadrado de 128 x 128 células (era 512 x 512; mudado em 14/11/2026).
+inline constexpr int LARGURA = 128;
+inline constexpr int ALTURA  = 128;
+// Água: 8 células a partir de cada borda (era 48). Depois começa a terra.
+inline constexpr int BORDA_AGUA = 8;
 
 // --- Quantidades iniciais -------------------------------------------------
 inline constexpr int NUM_NPCS      = 4;

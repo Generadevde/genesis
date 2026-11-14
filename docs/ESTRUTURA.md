@@ -46,8 +46,7 @@ cd genesis
 ./genesis
 ```
 
-Para ver a ilha inteira: maximize o terminal e diminua bastante a fonte
-(Ctrl + − no terminal do Mint). Sair: **Ctrl+C**.
+Setas do teclado: movem a câmera. Sair: **q** ou **Ctrl+C**.
 
 Para atualizar depois:
 

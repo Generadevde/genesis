@@ -6,14 +6,17 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 ## Regras definidas pelo dono do projeto
 
 ### Executável
-- `./genesis` abre direto na simulação, **sem menus**. Sai com **Ctrl+C**.
+- `./genesis` abre direto na simulação, **sem menus**. Sai com **Ctrl+C** ou **q**.
 - Simulação em **tempo real** (por enquanto).
-- **Uma janela grande mostrando a ilha inteira**, sem câmera (por enquanto).
+- **Câmera nas setas** do teclado (pedido em 14/11/2026, junto com o mapa menor).
+  Cada toque move a vista **1 célula** (segurar a seta faz correr). A vista
+  começa no centro do mapa e mostra o que couber no terminal.
 
 ### Mapa
-- **512 × 512** células, quadrado (por enquanto).
-- **48 células de água** a partir de cada borda; depois começa a terra.
-  A terra fica com **416 × 416**.
+- **128 × 128** células, quadrado (por enquanto). Era 512 × 512: a tela do
+  dono do projeto mostrava só água.
+- **8 células de água** a partir de cada borda (era 48); depois começa a
+  terra. A terra fica com **112 × 112**.
 - Grama: `"` em **verde**. Água: `~` em **azul**.
 
 ### Macieiras 🌳
@@ -46,6 +49,7 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 
 | Regra | Onde | Como |
 |---|---|---|
+| Câmera | `interface/principal.py` (`Tela`) | O terminal fica em modo cbreak (tecla chega sem Enter). Cada seta soma ±1 na posição da câmera; a câmera não sai do mapa. Só desenha o pedaço visível. Não mexe em nada do mundo. |
 | Tempo real | `interface/principal.py` | A cada quadro, mede quanto tempo passou no relógio e chama `mundo.avancar(dt)` com esse valor. |
 | Passagem do tempo | `Mundo::avancar` | Simulação por eventos: cada NPC e cada macieira tem um relógio regressivo. O motor anda até o próximo que vence, dispara, e segue. Não há "passo interno" inventado. |
 | Fome −3 a cada 5 s | `Mundo::evento_fome` | Relógio de 5 s por NPC. Chegou a 0 → `morrer`. |
@@ -67,15 +71,15 @@ célula, NPC só em grama) em 50 ilhas × 1 hora simulada.
 
 ## Observado nos testes (para o dono do projeto avaliar)
 
-- Nas 50 ilhas × 1 hora, dos 200 NPCs, **só 11 chegaram a comer** e **189
-  morreram sem comer** (aos 170 s). Motivo: a terra tem 416 × 416, são só 6
-  macieiras e o NPC enxerga 32 × 32; andando ao acaso, quase nunca chega
-  perto de uma árvore antes de morrer. Não mudei nada: é o resultado das
-  regras atuais.
-- A ilha inteira na tela ocupa **1024 colunas × 513 linhas** (cada célula
-  tem 2 colunas por causa dos emojis). Para ver tudo, o terminal precisa
-  estar maximizado com a fonte bem pequena; senão aparece só o canto de cima
-  à esquerda.
+Com o mapa de 128 × 128 (50 ilhas × 1 hora simulada, 200 NPCs):
+- **97 NPCs chegaram a comer** e **103 morreram sem comer** (aos 170 s).
+- Depois de 1 hora, **só 7 dos 200 continuavam vivos**.
+- Motivo: a fome cai 36 por minuto, e cada maçã dá 12 e leva 10 s para
+  comer. Andando ao acaso, o NPC só come se passar perto de uma árvore;
+  mesmo os que comem, comem menos do que gastam. Não mudei nada: é o
+  resultado das regras atuais.
+
+(Antes, com 512 × 512: só 11 de 200 chegaram a comer.)
 
 ## Em aberto
 

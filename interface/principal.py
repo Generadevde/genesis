@@ -4,18 +4,23 @@ principal.py — interface do Genesis (Python + rich).
 O que este arquivo faz:
     1. Cria o mundo no motor em C++ (módulo `genesis_motor`, via pybind11).
     2. Em tempo real, pede ao motor para andar o tempo que passou no relógio
-       de verdade, e desenha a ilha inteira no terminal.
+       de verdade, e desenha no terminal o pedaço da ilha que cabe na tela.
+    3. As SETAS do teclado movem a câmera (a vista) pelo mapa.
 
-Regra da STACK.md: a interface só MOSTRA. Nenhuma regra da simulação mora
-aqui (fome, maçãs, passos... tudo isso está no motor, em C++).
+Regra da STACK.md: a interface só MOSTRA e CONTROLA. Nenhuma regra da
+simulação mora aqui (fome, maçãs, passos... tudo isso está no motor, em C++).
+A câmera é só da tela: mexer nela não muda nada no mundo.
 
 Sem menus (pedido do dono do projeto): abre direto na simulação.
-Para sair: Ctrl+C.
+Sair: Ctrl+C ou a tecla q.
 """
 
 import os
+import select
 import sys
+import termios
 import time
+import tty
 from pathlib import Path
 
 from rich.console import Console, Group
@@ -33,6 +38,7 @@ import genesis_motor as gm  # noqa: E402  (precisa vir depois do ajuste do camin
 # Os emojis ocupam 2 colunas no terminal; por isso TODA célula tem 2 colunas,
 # e a grama e a água aparecem dobradas ("" e ~~) para o mapa não entortar.
 # ---------------------------------------------------------------------------
+COLUNAS_POR_CELULA = 2
 GRAMA = ('""', "green")
 AGUA = ("~~", "blue")
 SIMBOLO_OCUPANTE = {
@@ -49,71 +55,99 @@ NOME_ESTADO = {
     gm.EstadoNpc.MORTO: "morto",
 }
 
-# Valor do byte de terreno para grama (número do enum vindo do motor).
 GRAMA_BYTE = int(gm.Terreno.GRAMA)
 
+# Teclas: o terminal manda as setas como sequências de 3 caracteres.
+# Cada seta move a câmera 1 célula (a menor unidade do mapa).
+SETAS = {
+    b"\x1b[A": (0, -1),  # cima
+    b"\x1b[B": (0, 1),   # baixo
+    b"\x1b[C": (1, 0),   # direita
+    b"\x1b[D": (-1, 0),  # esquerda
+}
 
-def linha_de_terreno(terreno_linha: bytes) -> Text:
-    """Desenha uma linha só de chão (sem nada em cima).
 
-    Junta células iguais seguidas num pedaço só, para o rich ter menos
-    trabalho (uma linha de grama inteira vira um único pedaço verde).
+def desenhar_linha(terreno: bytes, ocupacao: bytes) -> Text:
+    """Desenha um pedaço de linha do mapa.
+
+    Células de chão iguais e seguidas viram um pedaço só (menos trabalho
+    para o rich). Onde há algo em cima do chão, entra o emoji.
     """
     texto = Text(no_wrap=True, overflow="crop")
-    inicio = 0
-    for i in range(1, len(terreno_linha) + 1):
-        if i == len(terreno_linha) or terreno_linha[i] != terreno_linha[inicio]:
-            simbolo, cor = GRAMA if terreno_linha[inicio] == GRAMA_BYTE else AGUA
-            texto.append(simbolo * (i - inicio), style=cor)
-            inicio = i
-    return texto
-
-
-def linha_com_coisas(terreno_linha: bytes, ocupacao_linha: bytes) -> Text:
-    """Desenha uma linha que tem macieira, maçã, NPC ou corpo em cima."""
-    texto = Text(no_wrap=True, overflow="crop")
-    for t, o in zip(terreno_linha, ocupacao_linha):
-        if o:
-            texto.append(SIMBOLO_OCUPANTE[o])
-        else:
-            simbolo, cor = GRAMA if t == GRAMA_BYTE else AGUA
-            texto.append(simbolo, style=cor)
+    i, n = 0, len(terreno)
+    while i < n:
+        if ocupacao[i]:
+            texto.append(SIMBOLO_OCUPANTE[ocupacao[i]])
+            i += 1
+            continue
+        j = i
+        while j < n and not ocupacao[j] and terreno[j] == terreno[i]:
+            j += 1
+        simbolo, cor = GRAMA if terreno[i] == GRAMA_BYTE else AGUA
+        texto.append(simbolo * (j - i), style=cor)
+        i = j
     return texto
 
 
 class Tela:
-    """Guarda o que não muda (o chão) e monta a imagem de cada quadro."""
+    """Câmera + montagem de cada quadro."""
 
     def __init__(self, mundo: "gm.Mundo") -> None:
         self.mundo = mundo
         self.largura = mundo.largura
-        terreno = mundo.terreno_bytes()
-        self.terreno_linhas = [
-            terreno[y * self.largura:(y + 1) * self.largura]
-            for y in range(mundo.altura)
-        ]
-        # O chão nunca muda: cada linha "vazia" é desenhada uma vez só.
-        self.cache_chao = [linha_de_terreno(l) for l in self.terreno_linhas]
+        self.altura = mundo.altura
+        self.terreno = mundo.terreno_bytes()  # o chão não muda
+        # Câmera = célula do mapa no canto de cima à esquerda da tela.
+        # Começa com o centro do mapa no centro da tela (ajustado no 1º quadro).
+        self.cam_x = None
+        self.cam_y = None
+
+    def tamanho_vista(self, console: Console) -> tuple[int, int]:
+        """Quantas células cabem na tela (1 linha fica para o status)."""
+        colunas = max(1, console.width // COLUNAS_POR_CELULA)
+        linhas = max(1, console.height - 1)
+        return min(colunas, self.largura), min(linhas, self.altura)
+
+    def limitar(self, vis_l: int, vis_a: int) -> None:
+        """Não deixa a câmera sair do mapa."""
+        self.cam_x = max(0, min(self.cam_x, self.largura - vis_l))
+        self.cam_y = max(0, min(self.cam_y, self.altura - vis_a))
+
+    def mover(self, dx: int, dy: int) -> None:
+        self.cam_x += dx
+        self.cam_y += dy
 
     def status(self) -> Text:
         """Linha de cima: tempo, maçãs no chão e situação de cada NPC."""
         segundos = int(self.mundo.tempo)
-        partes = [f"Genesis  ⏱ {segundos // 60:02d}:{segundos % 60:02d}",
-                  f"🍎 no chão: {len(self.mundo.macas())}"]
+        partes = [f"⏱ {segundos // 60:02d}:{segundos % 60:02d}",
+                  f"🍎 {len(self.mundo.macas())}"]
         for n in self.mundo.npcs():
-            partes.append(f"🗿{n.id + 1} fome {n.fome:.0f} ({NOME_ESTADO[n.estado]})")
-        return Text("   ".join(partes), style="bold")
+            partes.append(f"🗿{n.id + 1} {n.fome:.0f} {NOME_ESTADO[n.estado]}")
+        partes.append(f"câmera ({self.cam_x},{self.cam_y}) setas: mover  q: sair")
+        return Text("  ".join(partes), style="bold", no_wrap=True,
+                    overflow="crop")
 
-    def quadro(self) -> Group:
+    def quadro(self, console: Console) -> Group:
+        vis_l, vis_a = self.tamanho_vista(console)
+        if self.cam_x is None:  # primeiro quadro: centraliza
+            self.cam_x = (self.largura - vis_l) // 2
+            self.cam_y = (self.altura - vis_a) // 2
+        self.limitar(vis_l, vis_a)
+
         ocupacao = self.mundo.ocupacao_bytes()
         linhas = []
-        for y, chao in enumerate(self.terreno_linhas):
-            ocup = ocupacao[y * self.largura:(y + 1) * self.largura]
-            # any(ocup) = existe algum byte diferente de zero (alguma coisa
-            # em cima do chão). Se não, usa a linha de chão já pronta.
-            linhas.append(linha_com_coisas(chao, ocup) if any(ocup)
-                          else self.cache_chao[y])
+        for y in range(self.cam_y, self.cam_y + vis_a):
+            ini = y * self.largura + self.cam_x
+            fim = ini + vis_l
+            linhas.append(desenhar_linha(self.terreno[ini:fim], ocupacao[ini:fim]))
         return Group(self.status(), *linhas)
+
+
+def ler_teclas(fd: int, espera: float) -> bytes:
+    """Espera até `espera` segundos por teclas; devolve o que chegou."""
+    pronto, _, _ = select.select([fd], [], [], max(0.0, espera))
+    return os.read(fd, 64) if pronto else b""
 
 
 def main() -> None:
@@ -121,25 +155,41 @@ def main() -> None:
     semente = int.from_bytes(os.urandom(8), "little")
     mundo = gm.Mundo(semente)
     tela = Tela(mundo)
+    console = Console()
 
-    # A tela atualiza no mesmo ritmo do passo do NPC (1 s), que é o que
-    # mais se mexe na simulação. O número vem do motor (config.hpp).
+    # A simulação é redesenhada no ritmo do passo do NPC (1 s), que é o que
+    # mais se mexe. O número vem do motor (config.hpp). Apertar uma seta
+    # redesenha na hora, sem esperar.
     intervalo = gm.NPC_PASSO_S
 
-    console = Console()
+    fd = sys.stdin.fileno()
+    config_terminal = termios.tcgetattr(fd)
     try:
+        # cbreak: as teclas chegam na hora, sem precisar de Enter.
+        tty.setcbreak(fd)
         with Live(console=console, screen=True, auto_refresh=False,
                   vertical_overflow="crop") as live:
             ultimo = time.monotonic()
+            proximo_quadro = ultimo
             while True:
                 agora = time.monotonic()
                 mundo.avancar(agora - ultimo)  # tempo real
                 ultimo = agora
-                live.update(tela.quadro(), refresh=True)
-                gasto = time.monotonic() - agora
-                time.sleep(max(0.0, intervalo - gasto))
+                live.update(tela.quadro(console), refresh=True)
+                if agora >= proximo_quadro:
+                    proximo_quadro = agora + intervalo
+
+                teclas = ler_teclas(fd, proximo_quadro - time.monotonic())
+                if b"q" in teclas:
+                    break
+                for seq, (dx, dy) in SETAS.items():
+                    for _ in range(teclas.count(seq)):
+                        tela.mover(dx, dy)
     except KeyboardInterrupt:
         pass
+    finally:
+        # Devolve o terminal ao normal, aconteça o que acontecer.
+        termios.tcsetattr(fd, termios.TCSADRAIN, config_terminal)
 
 
 if __name__ == "__main__":

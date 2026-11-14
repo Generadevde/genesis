@@ -27,16 +27,16 @@ def cheb(a, b):
 
 def teste_mapa():
     w = gm.Mundo(1)
-    assert (w.largura, w.altura) == (512, 512)
+    assert (w.largura, w.altura) == (128, 128)
     t = w.terreno_bytes()
     grama = sum(1 for b in t if b == int(gm.Terreno.GRAMA))
-    assert grama == 416 * 416, grama
+    assert grama == 112 * 112, grama
     # 48 de água em cada borda, depois grama
-    assert w.terreno(47, 256) == gm.Terreno.AGUA
-    assert w.terreno(48, 256) == gm.Terreno.GRAMA
-    assert w.terreno(463, 256) == gm.Terreno.GRAMA
-    assert w.terreno(464, 256) == gm.Terreno.AGUA
-    print("ok  mapa 512x512, 48 de água em cada borda, terra 416x416")
+    assert w.terreno(7, 64) == gm.Terreno.AGUA
+    assert w.terreno(8, 64) == gm.Terreno.GRAMA
+    assert w.terreno(119, 64) == gm.Terreno.GRAMA
+    assert w.terreno(120, 64) == gm.Terreno.AGUA
+    print("ok  mapa 128x128, 8 de água em cada borda, terra 112x112")
 
 
 def teste_inicio():
