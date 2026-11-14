@@ -13,7 +13,7 @@ Definida pelo dono do projeto em 14/11/2026.
 
 ## Versões (decididas em 14/11/2026)
 
-- **Python 3.13**
+- **Python 3.12** (o que já vem no Mint; antes cogitado o 3.13)
 - **C++20**
 
 ## Plataforma
@@ -35,4 +35,4 @@ separada da simulação: trocar a tela não pode exigir mexer no motor.
 
 ## Em aberto
 
-- Versão exata do Mint e como instalar o Python 3.13 nele.
+- Versão exata do Mint.
