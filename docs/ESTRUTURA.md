@@ -59,10 +59,10 @@ git pull
 ./genesis
 ```
 
-O `./genesis` confere sozinho se o código do motor (C++) mudou desde a
-última compilação e, se mudou, recompila antes de abrir. O `./instalar.sh`
-precisa ser rodado de novo quando mudar uma biblioteca do Python (como na
-troca do rich pelo pygame) ou se o ambiente Python for apagado.
+O `./genesis` confere sozinho, antes de abrir: se falta alguma biblioteca
+do Python (instala) e se o código do motor (C++) mudou desde a última
+compilação (recompila). O `./instalar.sh` só precisa ser rodado de novo se
+o ambiente Python (`.venv/`) for apagado.
 
 Rodar os testes:
 
