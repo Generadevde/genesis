@@ -9,5 +9,6 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Primeira simulação (a ilha): [docs/ILHA_V1.md](docs/ILHA_V1.md)
 - Mundo em 3D e gerador: [docs/MUNDO_3D.md](docs/MUNDO_3D.md)
 - Memória dos NPCs: [docs/MEMORIA.md](docs/MEMORIA.md)
+- Sistema de tempo: [docs/TEMPO.md](docs/TEMPO.md)
 - Nomes e carregar maçã: [docs/CARREGAR.md](docs/CARREGAR.md)
 - Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

@@ -16,6 +16,15 @@ inline constexpr int ALTURA  = 128;
 // Água: 8 células a partir de cada borda (era 48). Depois começa a terra.
 inline constexpr int BORDA_AGUA = 8;
 
+// --- Tempo do jogo (pedido em 14/11/2026) --------------------------------
+// 1 hora do jogo = 60 s da simulação (valor "por enquanto" do dono).
+// Logo, 1 minuto do jogo = 1 s. O dia tem 24 horas.
+inline constexpr double SEGUNDOS_POR_HORA = 60.0;
+inline constexpr int HORAS_POR_DIA = 24;
+inline constexpr double SEGUNDOS_POR_DIA = SEGUNDOS_POR_HORA * HORAS_POR_DIA;
+// O jogo começa no Dia 1, a esta hora (PROVISÓRIO).
+inline constexpr int HORA_INICIAL = 0;
+
 // --- Mundo em 3 dimensões (pedido em 14/11/2026) -------------------------
 // Níveis z de -64 a +64; o nível 0 é o nível do mar.
 inline constexpr int Z_MIN = -64;

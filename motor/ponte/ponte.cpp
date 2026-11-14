@@ -84,6 +84,13 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("macieiras_lembradas", &Npc::macieiras_lembradas)
         .def_readonly("aguas_lembradas", &Npc::aguas_lembradas);
 
+    py::class_<Mundo::Relogio>(m, "Relogio")
+        .def_readonly("dia", &Mundo::Relogio::dia)
+        .def_readonly("hora", &Mundo::Relogio::hora)
+        .def_readonly("minuto", &Mundo::Relogio::minuto);
+
+    m.attr("SEGUNDOS_POR_HORA") = config::SEGUNDOS_POR_HORA;
+
     py::class_<Mundo>(m, "Mundo")
         .def(py::init<std::uint64_t>(), py::arg("semente"))
         .def("avancar", &Mundo::avancar, py::arg("dt"),
@@ -91,6 +98,7 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_property_readonly("largura", &Mundo::largura)
         .def_property_readonly("altura", &Mundo::altura)
         .def_property_readonly("tempo", &Mundo::tempo)
+        .def("relogio", &Mundo::relogio, "Dia, hora e minuto do jogo.")
         .def("ocupante", &Mundo::ocupante, py::arg("x"), py::arg("y"))
         .def("material", [](const Mundo& w, int x, int y, int z) {
             return w.mapa().material(x, y, z);

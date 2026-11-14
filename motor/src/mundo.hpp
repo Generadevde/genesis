@@ -111,6 +111,9 @@ public:
     int largura() const;
     int altura() const;
     double tempo() const { return tempo_; }
+    // Relógio do jogo (1 h = 60 s; ver config.hpp). Dia começa em 1.
+    struct Relogio { int dia; int hora; int minuto; };
+    Relogio relogio() const;
     Ocupante ocupante(int x, int y) const;
     const Mapa3D& mapa() const { return mapa_; }
     const std::vector<Macieira>& macieiras() const { return macieiras_; }

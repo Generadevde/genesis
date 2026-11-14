@@ -394,8 +394,24 @@ def teste_carregar(sementes=60, duracao=1800):
           f"{soltou} soltas ao morrer")
 
 
+def teste_relogio():
+    """1 hora do jogo = 60 s; o jogo começa no Dia 1, 00:00."""
+    w = gm.Mundo(1)
+    casos = [(0, (1, 0, 0)), (1, (1, 0, 1)), (59.5, (1, 0, 59)), (60, (1, 1, 0)),
+             (23 * 60 + 59, (1, 23, 59)), (24 * 60, (2, 0, 0)),
+             (3 * 24 * 60 + 5 * 60 + 7, (4, 5, 7))]
+    feito = 0.0
+    for t, (dia, hora, minuto) in casos:
+        w.avancar(t - feito)
+        feito = t
+        r = w.relogio()
+        assert (r.dia, r.hora, r.minuto) == (dia, hora, minuto), (t, r.dia, r.hora, r.minuto)
+    print("ok  relógio: 1 h = 60 s, 1 dia = 24 min reais; começa no Dia 1, 00:00")
+
+
 if __name__ == "__main__":
     teste_mapa()
+    teste_relogio()
     teste_inicio()
     teste_quedas()
     teste_maca_em_volta()

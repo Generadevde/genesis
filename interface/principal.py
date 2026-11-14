@@ -439,12 +439,16 @@ class Genesis:
             win98.escrever(self.tela, f, linha, (r.left + 2 * A.ESPACO, y))
             y += self.fonte.get_height() + A.ESPACO
 
+    def texto_relogio(self) -> str:
+        """Dia e hora do jogo (1 h = 60 s; ver config.hpp)."""
+        r = self.mundo.relogio()
+        return f"Dia {r.dia}, {r.hora:02d}:{r.minuto:02d}"
+
     def desenhar_status(self, r: pygame.Rect) -> None:
         """Barra de baixo: só o tempo e o nome do que está sob o mouse."""
         pygame.draw.rect(self.tela, A.CINZA, r)
-        s = int(self.mundo.tempo)
         x = r.left + 2
-        x = self._campo_status(r, x, f"Tempo {s // 60:02d}:{s % 60:02d}")
+        x = self._campo_status(r, x, self.texto_relogio())
         # Botões de velocidade: o ligado fica afundado.
         self._botoes_velocidade = []
         for texto, mult in VELOCIDADES:
@@ -502,11 +506,11 @@ class Genesis:
         pygame.draw.rect(self.tela, A.CINZA, area)
         campo = area.inflate(-2 * A.ESPACO, -2 * A.ESPACO)
         win98.caixa(self.tela, campo, saliente=False, cor=A.FUNDO_CAMPO)
-        s = int(self.mundo.tempo)
         zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
         secoes = [
             ("Simulação", [
-                f"Tempo: {s // 60:02d}:{s % 60:02d}",
+                f"Tempo: {self.texto_relogio()}  (1 hora do jogo = "
+                f"{gm.SEGUNDOS_POR_HORA:.0f} s)",
                 f"Velocidade: {self.velocidade}x",
                 f"Maçãs no chão: {len(self.mundo.macas())}",
             ]),

@@ -462,6 +462,19 @@ void Mundo::evento_queda_maca(int indice_macieira) {
 // Ajudantes
 // ===========================================================================
 
+// Converte os segundos da simulação em dia, hora e minuto do jogo.
+Mundo::Relogio Mundo::relogio() const {
+    const double total = tempo_ + cfg::HORA_INICIAL * cfg::SEGUNDOS_POR_HORA;
+    const long long minutos =
+        static_cast<long long>(total / (cfg::SEGUNDOS_POR_HORA / 60.0) + 1e-9);
+    const long long minutos_por_dia = 60LL * cfg::HORAS_POR_DIA;
+    Relogio r;
+    r.dia = static_cast<int>(minutos / minutos_por_dia) + 1;
+    r.hora = static_cast<int>((minutos % minutos_por_dia) / 60);
+    r.minuto = static_cast<int>(minutos % 60);
+    return r;
+}
+
 int Mundo::largura() const { return cfg::LARGURA; }
 int Mundo::altura() const { return cfg::ALTURA; }
 

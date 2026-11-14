@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.5: nomes e carregar maçã (docs/CARREGAR.md).
-    return "Genesis — motor 0.5 (nomes, carregar)";
+    // Versão 0.6: sistema de tempo (docs/TEMPO.md).
+    return "Genesis — motor 0.6 (tempo)";
 }
 
 }  // namespace genesis

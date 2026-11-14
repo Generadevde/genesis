@@ -13,7 +13,8 @@ terminal (rich), que foi apagada.
   - **Nova simulação** — começa o mundo de novo;
   - **Exibir** — mostra a tela com as informações (aba NPCs);
   - **Sair**.
-- **Barra de status embaixo**: só o **tempo** e o **nome do que está sob o
+- **Barra de status embaixo**: só o **tempo** (dia e hora do jogo, ver
+  [TEMPO.md](TEMPO.md)), os botões de velocidade e o **nome do que está sob o
   mouse** (entidade ou material). As outras informações e os atalhos de
   teclado ficam na aba **Info** (pedido em 14/11/2026).
 - **Clique num caractere**: aparece **à direita** um painel com o **símbolo
@@ -38,7 +39,7 @@ terminal (rich), que foi apagada.
 │ │   aba Info: informações e atalhos     │ │           │ │
 │ │                                       │ │ Fome: 55  │ │
 │ └───────────────────────────────────────┘ └───────────┘ │
-│ [Tempo 01:15][>][>>][>>>>][NPC 2]                       │ ← tempo, velocidade, sob o mouse
+│ [Dia 1, 01:15][>][>>][>>>>][Jhon]                       │ ← dia/hora, velocidade, sob o mouse
 └─────────────────────────────────────────────────────────┘
 ```
 
