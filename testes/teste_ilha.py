@@ -172,6 +172,48 @@ def teste_geral(sementes=50, duracao=3600):
           f"NPCs: {comeu} comeram, {bebeu} beberam, {vivos} vivos no fim")
 
 
+def teste_memoria(sementes=50, duracao=1800):
+    """Memória: lembra só onde usou, nunca esquece, e usa o que lembra."""
+    viu_ida_arvore = viu_ida_agua = 0
+    for s in range(sementes):
+        w = gm.Mundo(20000 + s)
+        arvores = [m.pos for m in w.macieiras()]
+        antes = {n.id: (len(n.macieiras_lembradas), len(n.aguas_lembradas),
+                        n.estado) for n in w.npcs()}
+        for _ in range(duracao):
+            w.avancar(1.0)
+            for n in w.npcs():
+                na, nag, est0 = antes[n.id]
+                ml, al = n.macieiras_lembradas, n.aguas_lembradas
+                # Nunca esquece: as listas só crescem.
+                assert len(ml) >= na and len(al) >= nag
+                # Sem repetição na memória.
+                assert len(set(ml)) == len(ml)
+                assert len({(p.x, p.y) for p in al}) == len(al)
+                # Água lembrada é água de verdade.
+                for p in al:
+                    assert w.terreno(p.x, p.y) == gm.Terreno.AGUA
+                # Só aprende onde usou: macieira nova só depois de comer,
+                # água nova só depois de beber.
+                if len(ml) > na:
+                    assert est0 == E.COMENDO  # terminou de comer (pode já ter começado outra)
+                if len(al) > nag:
+                    assert est0 == E.BEBENDO  # terminou de beber (pode já ter começado outro gole)
+                # Indo por memória: o alvo é um lugar lembrado.
+                if n.pela_memoria and n.estado == E.INDO_COMER:
+                    assert any(arvores[i].x == n.alvo.x and arvores[i].y == n.alvo.y
+                               for i in ml)
+                    viu_ida_arvore += 1
+                if n.pela_memoria and n.estado == E.INDO_BEBER:
+                    assert any(p.x == n.alvo.x and p.y == n.alvo.y for p in al)
+                    viu_ida_agua += 1
+                antes[n.id] = (len(ml), len(al), n.estado)
+    assert viu_ida_arvore > 0 and viu_ida_agua > 0
+    print(f"ok  memória: só aprende onde usou, nunca esquece, volta aos lugares "
+          f"lembrados ({viu_ida_arvore} passos indo a macieira lembrada, "
+          f"{viu_ida_agua} indo a água lembrada)")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_inicio()
@@ -179,5 +221,6 @@ if __name__ == "__main__":
     teste_maca_em_volta()
     teste_morte_sem_nada()
     teste_acoes()
+    teste_memoria()
     teste_geral()
     print("TODOS OS TESTES PASSARAM")

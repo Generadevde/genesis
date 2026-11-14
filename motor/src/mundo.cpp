@@ -44,6 +44,7 @@ constexpr Pos VIZINHOS[8] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
 Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
     gerar_terreno();
     ocupacao_.assign(terreno_.size(), Ocupante::Nada);
+    origem_maca_.assign(terreno_.size(), -1);
 
     // 6 macieiras em células de grama livres, sorteadas ("espalhadas").
     for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) {
@@ -147,10 +148,11 @@ void Mundo::avancar(double dt) {
                 evento_passo(n);
             }
         }
-        for (Macieira& m : macieiras_) {
+        for (int i = 0; i < static_cast<int>(macieiras_.size()); ++i) {
+            Macieira& m = macieiras_[i];
             if (m.falta_queda <= EPS) {
                 m.falta_queda += sortear_queda();
-                evento_queda_maca(m);
+                evento_queda_maca(i);
             }
         }
     }
@@ -212,6 +214,7 @@ void Mundo::evento_passo(Npc& n) {
     // Regra: não volta para a célula de onde acabou de sair.
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
+    n.pela_memoria = false;
     std::vector<Pos> opcoes;
     for (Pos v : VIZINHOS) {
         Pos p{n.pos.x + v.x, n.pos.y + v.y};
@@ -232,10 +235,12 @@ void Mundo::evento_passo(Npc& n) {
 // senão, dá um passo na direção dela. Devolve falso se não viu maçã.
 bool Mundo::tentar_comer(Npc& n) {
     Pos maca;
-    if (!procurar_maca(n, maca)) return false;
+    // Primeiro o que ele VÊ agora; se não vê maçã, usa a memória.
+    if (!procurar_maca(n, maca)) return ir_a_macieira_lembrada(n);
     n.estado = EstadoNpc::IndoComer;
     n.alvo = maca;
     n.tem_alvo = true;
+    n.pela_memoria = false;
     // A maçã ocupa a célula dela, então o NPC come de uma célula vizinha.
     if (distancia_passos(n.pos, maca) == 1) {
         reservas_[indice(maca)] = n.id;
@@ -251,16 +256,72 @@ bool Mundo::tentar_comer(Npc& n) {
 // de grama vizinha. A água não acaba e não é reservada.
 bool Mundo::tentar_beber(Npc& n) {
     Pos agua;
-    if (!procurar_agua(n, agua)) return false;
+    // Primeiro o que ele VÊ agora; se não vê água, usa a memória.
+    if (!procurar_agua(n, agua)) return ir_a_agua_lembrada(n);
     n.estado = EstadoNpc::IndoBeber;
     n.alvo = agua;
     n.tem_alvo = true;
+    n.pela_memoria = false;
     if (distancia_passos(n.pos, agua) == 1) {
         n.estado = EstadoNpc::Bebendo;
         n.falta_acao = cfg::BEBER_DURACAO_S;
         return true;
     }
     passo_em_direcao(n, agua);
+    return true;
+}
+
+// Com fome e sem maçã à vista: vai até a macieira lembrada mais próxima.
+// Ao chegar ao lado dela, se continua sem ver maçã, marca a macieira como
+// "vista vazia" e passa para a próxima lembrada (decisão do dono do projeto).
+// Quando todas as lembradas estão vazias, esquece a lista de vazias e anda
+// à toa neste passo; no próximo, recomeça pela mais próxima — PROVISÓRIO,
+// aguardando o dono do projeto.
+// Devolve falso se não lembra de nenhuma macieira (ou todas vazias agora).
+bool Mundo::ir_a_macieira_lembrada(Npc& n) {
+    while (true) {
+        int melhor = -1, melhor_d = 0;
+        for (int idx : n.macieiras_lembradas) {
+            if (std::find(n.macieiras_vistas_vazias.begin(),
+                          n.macieiras_vistas_vazias.end(),
+                          idx) != n.macieiras_vistas_vazias.end())
+                continue;
+            const int d = distancia_passos(n.pos, macieiras_[idx].pos);
+            if (melhor < 0 || d < melhor_d) { melhor = idx; melhor_d = d; }
+        }
+        if (melhor < 0) {  // nenhuma sobrando
+            n.macieiras_vistas_vazias.clear();
+            return false;
+        }
+        const Pos arvore = macieiras_[melhor].pos;
+        if (melhor_d <= 1) {  // chegou e não há maçã à vista: próxima
+            n.macieiras_vistas_vazias.push_back(melhor);
+            continue;
+        }
+        n.estado = EstadoNpc::IndoComer;
+        n.alvo = arvore;
+        n.tem_alvo = true;
+        n.pela_memoria = true;
+        passo_em_direcao(n, arvore);
+        return true;
+    }
+}
+
+// Com sede e sem água à vista: vai até a água lembrada mais próxima.
+// (A água não acaba; ao chegar ao lado, ele já a vê e bebe.)
+bool Mundo::ir_a_agua_lembrada(Npc& n) {
+    if (n.aguas_lembradas.empty()) return false;
+    Pos melhor = n.aguas_lembradas.front();
+    int melhor_d = distancia_passos(n.pos, melhor);
+    for (Pos p : n.aguas_lembradas) {
+        const int d = distancia_passos(n.pos, p);
+        if (d < melhor_d) { melhor = p; melhor_d = d; }
+    }
+    n.estado = EstadoNpc::IndoBeber;
+    n.alvo = melhor;
+    n.tem_alvo = true;
+    n.pela_memoria = true;
+    passo_em_direcao(n, melhor);
     return true;
 }
 
@@ -288,7 +349,15 @@ void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
 // Terminou os 10 s comendo: a maçã some e a fome sobe 12 (até 100).
 void Mundo::evento_fim_comer(Npc& n) {
     const int i = indice(n.alvo);
+    // Memória: lembra a macieira de onde veio esta maçã (se ainda não lembra).
+    const int arvore = origem_maca_[i];
+    if (arvore >= 0 &&
+        std::find(n.macieiras_lembradas.begin(), n.macieiras_lembradas.end(),
+                  arvore) == n.macieiras_lembradas.end())
+        n.macieiras_lembradas.push_back(arvore);
+    n.macieiras_vistas_vazias.clear();  // comeu: a busca recomeça do zero
     ocupacao_[i] = Ocupante::Nada;
+    origem_maca_[i] = -1;
     reservas_.erase(i);
     n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
     n.estado = EstadoNpc::Vagando;
@@ -298,6 +367,10 @@ void Mundo::evento_fim_comer(Npc& n) {
 // Terminou os 10 s bebendo: a sede sobe 15 (até 100). A água não acaba.
 void Mundo::evento_fim_beber(Npc& n) {
     n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::GOLE_RECUPERA);
+    // Memória: lembra a célula de água onde bebeu (se ainda não lembra).
+    if (std::find(n.aguas_lembradas.begin(), n.aguas_lembradas.end(),
+                  n.alvo) == n.aguas_lembradas.end())
+        n.aguas_lembradas.push_back(n.alvo);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
 }
@@ -305,7 +378,8 @@ void Mundo::evento_fim_beber(Npc& n) {
 // Uma maçã cai em volta da macieira: na primeira camada que tiver célula
 // de grama livre (camada 1 = as 8 vizinhas; se lotada, camada 2; e assim
 // por diante). Dentro da camada, a célula é sorteada.
-void Mundo::evento_queda_maca(Macieira& m) {
+void Mundo::evento_queda_maca(int indice_macieira) {
+    const Macieira& m = macieiras_[indice_macieira];
     const int max_camada = std::max(largura(), altura());
     for (int r = 1; r <= max_camada; ++r) {
         std::vector<Pos> opcoes;
@@ -317,7 +391,9 @@ void Mundo::evento_queda_maca(Macieira& m) {
             }
         if (!opcoes.empty()) {
             std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-            ocupacao_[indice(opcoes[d(rng_)])] = Ocupante::Maca;
+            const int i = indice(opcoes[d(rng_)]);
+            ocupacao_[i] = Ocupante::Maca;
+            origem_maca_[i] = indice_macieira;  // de onde ela caiu
             return;
         }
     }

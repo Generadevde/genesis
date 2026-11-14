@@ -279,9 +279,18 @@ class Genesis:
                 pygame.draw.rect(self.tela, A.BRANCO, r, 1)
         self.tela.set_clip(anterior)
 
+    @staticmethod
+    def texto_estado(n) -> str:
+        """Estado do NPC; indo a um lugar lembrado ganha "(memória)"."""
+        texto = NOME_ESTADO[n.estado]
+        if n.pela_memoria and n.estado in (EST.INDO_COMER, EST.INDO_BEBER):
+            texto += " (memória)"
+        return texto
+
     def linhas_tabela(self):
         return [[f"NPC {n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
-                 NOME_ESTADO[n.estado], f"({n.pos.x}, {n.pos.y})"]
+                 self.texto_estado(n), f"({n.pos.x}, {n.pos.y})",
+                 str(len(n.macieiras_lembradas)), str(len(n.aguas_lembradas))]
                 for n in self.mundo.npcs()]
 
     def desenhar_npcs(self, area: pygame.Rect) -> None:
@@ -289,7 +298,8 @@ class Genesis:
         sel = self.selecao[1] if self.selecao and self.selecao[0] == "npc" else None
         self._linhas_rects = win98.tabela(
             self.tela, area.inflate(-2 * A.ESPACO, -2 * A.ESPACO), self.fonte,
-            ["NPC", "Fome", "Sede", "Estado", "Posição"],
+            ["NPC", "Fome", "Sede", "Estado", "Posição",
+             "Macieiras lembradas", "Águas lembradas"],
             self.linhas_tabela(), selecionada=sel)
 
     def descrever_selecao(self):
@@ -303,11 +313,22 @@ class Genesis:
                 return "✝", A.PRETO, [f"Corpo do NPC {n.id + 1}",
                                       f"Morreu de {causa}",
                                       f"Posição: ({n.pos.x}, {n.pos.y})"]
-            return "🗿", A.PRETO, [f"NPC {n.id + 1}",
-                                   f"Fome: {n.fome:.0f}",
-                                   f"Sede: {n.sede:.0f}",
-                                   f"Estado: {NOME_ESTADO[n.estado]}",
-                                   f"Posição: ({n.pos.x}, {n.pos.y})"]
+            linhas = [f"NPC {n.id + 1}",
+                      f"Fome: {n.fome:.0f}",
+                      f"Sede: {n.sede:.0f}",
+                      f"Estado: {self.texto_estado(n)}",
+                      f"Posição: ({n.pos.x}, {n.pos.y})",
+                      "",
+                      "Memória:"]
+            arvores = self.mundo.macieiras()
+            for i in n.macieiras_lembradas:
+                p = arvores[i].pos
+                linhas.append(f"  macieira em ({p.x}, {p.y})")
+            if n.aguas_lembradas:
+                linhas.append(f"  água: {len(n.aguas_lembradas)} ponto(s)")
+            if len(linhas) == 7:
+                linhas.append("  (nenhum lugar ainda)")
+            return "🗿", A.PRETO, linhas
         _, x, y = self.selecao
         o = self.mundo.ocupante(x, y)
         pos = f"Posição: ({x}, {y})"

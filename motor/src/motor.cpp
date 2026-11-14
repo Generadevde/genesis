@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.2: a ilha com fome e sede (docs/ILHA_V1.md).
-    return "Genesis — motor 0.2 (fome e sede)";
+    // Versão 0.3: memória de lugares (docs/MEMORIA.md).
+    return "Genesis — motor 0.3 (memória)";
 }
 
 }  // namespace genesis

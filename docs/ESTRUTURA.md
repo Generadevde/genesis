@@ -70,4 +70,4 @@ Rodar os testes:
 
 ## Estado atual (14/11/2026)
 
-Motor 0.2: a ilha com fome e sede — ver [ILHA_V1.md](ILHA_V1.md).
+Motor 0.3: a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).

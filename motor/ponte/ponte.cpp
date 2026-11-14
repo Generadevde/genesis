@@ -64,7 +64,11 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("fome", &Npc::fome)
         .def_readonly("sede", &Npc::sede)
         .def_readonly("estado", &Npc::estado)
-        .def_readonly("falta_acao", &Npc::falta_acao);
+        .def_readonly("falta_acao", &Npc::falta_acao)
+        .def_readonly("pela_memoria", &Npc::pela_memoria)
+        .def_readonly("alvo", &Npc::alvo)
+        .def_readonly("macieiras_lembradas", &Npc::macieiras_lembradas)
+        .def_readonly("aguas_lembradas", &Npc::aguas_lembradas);
 
     py::class_<Mundo>(m, "Mundo")
         .def(py::init<std::uint64_t>(), py::arg("semente"))

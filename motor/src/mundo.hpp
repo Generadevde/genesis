@@ -15,6 +15,10 @@
 // Física (regra "corpos têm física"):
 //   Cada célula guarda no máximo UMA coisa: macieira, maçã, NPC ou corpo.
 //   Nada entra numa célula ocupada. Água não é andável.
+//
+// Memória do NPC (pedida em 14/11/2026):
+//   O NPC lembra SÓ dos lugares que usou: a macieira de onde veio a maçã que
+//   ele comeu, e a célula de água onde bebeu. Lembra todos e nunca esquece.
 // ---------------------------------------------------------------------------
 #pragma once
 
@@ -65,8 +69,16 @@ struct Npc {
     double falta_sede = 0.0;   // segundos até a próxima queda de sede
     double falta_acao = 0.0;   // segundos até terminar de comer/beber
     EstadoNpc estado = EstadoNpc::Vagando;
-    Pos alvo;                  // maçã ou célula de água do alvo atual
+    Pos alvo;                  // maçã, água ou macieira do alvo atual
     bool tem_alvo = false;
+    bool pela_memoria = false; // indo a um lugar lembrado (não visto agora)
+
+    // --- Memória ---------------------------------------------------------
+    std::vector<int> macieiras_lembradas;  // índices em Mundo::macieiras()
+    std::vector<Pos> aguas_lembradas;      // células de água onde já bebeu
+    // Macieiras lembradas que ele já foi ver nesta busca e estavam sem
+    // maçã. Ele passa para a próxima; ver Mundo::tentar_comer.
+    std::vector<int> macieiras_vistas_vazias;
 };
 
 class Mundo {
@@ -103,7 +115,7 @@ private:
     void evento_passo(Npc& n);
     void evento_fim_comer(Npc& n);
     void evento_fim_beber(Npc& n);
-    void evento_queda_maca(Macieira& m);
+    void evento_queda_maca(int indice_macieira);
 
     // --- Ajudantes --------------------------------------------------------
     bool dentro(Pos p) const;
@@ -115,6 +127,8 @@ private:
     bool tentar_comer(Npc& n);
     bool tentar_beber(Npc& n);
     void passo_em_direcao(Npc& n, Pos alvo);
+    bool ir_a_macieira_lembrada(Npc& n);
+    bool ir_a_agua_lembrada(Npc& n);
     void mover(Npc& n, Pos destino);
     void morrer(Npc& n);
     double sortear_queda();
@@ -123,6 +137,9 @@ private:
     std::mt19937_64 rng_;
     std::vector<Terreno> terreno_;
     std::vector<Ocupante> ocupacao_;
+    // Para cada célula com maçã: de qual macieira ela caiu (-1 = nenhuma).
+    // É assim que o NPC sabe qual macieira lembrar depois de comer.
+    std::vector<int> origem_maca_;
     std::vector<Macieira> macieiras_;
     std::vector<Npc> npcs_;
     // Maçã reservada -> id do NPC que está indo comer/comendo.

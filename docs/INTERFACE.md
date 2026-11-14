@@ -44,6 +44,10 @@ terminal (rich), que foi apagada.
 | Trocar de aba | Clique na aba, ou tecla `I` |
 | Menu | Clique em Arquivo; `Esc` fecha |
 
+O painel de um NPC mostra também a **memória** dele (macieiras lembradas e
+quantos pontos de água), e a aba NPCs tem as colunas "Macieiras lembradas"
+e "Águas lembradas" (ver [MEMORIA.md](MEMORIA.md)).
+
 A seleção de um NPC acompanha o NPC enquanto ele anda (e vira o corpo ✝ se
 ele morrer: o painel mostra "Morreu de fome" ou "Morreu de sede").
 
