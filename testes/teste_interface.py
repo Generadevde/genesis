@@ -93,6 +93,23 @@ def main() -> None:
     assert nome in (f"NPC {n.id + 1}", f"Corpo do NPC {n.id + 1}"), nome
     print(f"ok  barra de baixo: tempo + nome sob o mouse ('{nome}')")
 
+    # --- Botões de velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x
+    assert g.velocidade == 1
+    for (botao, mult) in list(g._botoes_velocidade):
+        evento(pygame.MOUSEBUTTONDOWN, button=1, pos=botao.center)
+        assert g.velocidade == mult, (g.velocidade, mult)
+        g.desenhar()
+    botao, mult = g._botoes_velocidade[-1]
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=botao.center)
+    assert g.velocidade == 1
+    # o tempo do motor anda vezes a velocidade
+    g.velocidade = 8
+    t0 = g.mundo.tempo
+    g.mundo.avancar(0.5 * g.velocidade)
+    assert abs(g.mundo.tempo - t0 - 4.0) < 1e-9
+    g.velocidade = 1
+    print("ok  velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x")
+
     g.nova_simulacao()
     g.desenhar()
     print(f"ok  interface: {quadros} quadros desenhados sem cair "

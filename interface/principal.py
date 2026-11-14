@@ -77,6 +77,10 @@ NOME_ESTADO = {
 #   2, 4, 6 -> afastado: cada célula da tela mostra um bloco 2x2, 4x4, 6x6
 ESCALAS = [0.5, 1, 2, 4, 6]
 
+# Botões de velocidade ao lado do tempo (pedido do dono do projeto):
+# ">" = 2x, ">>" = 4x, ">>>>" = 8x. Clicar no botão já ligado volta a 1x.
+VELOCIDADES = [(">", 2), (">>", 4), (">>>>", 8)]
+
 # Cada célula da tela vira um "código" antes de virar desenho:
 #   1..4       = ocupante (NPC, corpo, maçã, macieira — números do motor)
 #   100 + m    = material m do chão (ar, grama, terra, pedra, água)
@@ -179,6 +183,8 @@ class Genesis:
 
         self.rodando = True
         self._arraste = None  # clique-e-arraste do mapa em andamento
+        self.velocidade = 1   # 1x = tempo real; 2x, 4x, 8x pelos botões
+        self._botoes_velocidade = []  # (retângulo, multiplicador)
         self.nivel_zoom = ESCALAS.index(1)
         self.nova_simulacao()
 
@@ -425,18 +431,41 @@ class Genesis:
         """Barra de baixo: só o tempo e o nome do que está sob o mouse."""
         pygame.draw.rect(self.tela, A.CINZA, r)
         s = int(self.mundo.tempo)
-        partes = [f"Tempo {s // 60:02d}:{s % 60:02d}"]
+        x = r.left + 2
+        x = self._campo_status(r, x, f"Tempo {s // 60:02d}:{s % 60:02d}")
+        # Botões de velocidade: o ligado fica afundado.
+        self._botoes_velocidade = []
+        for texto, mult in VELOCIDADES:
+            w = self.fonte.size(texto)[0] + 4 * A.ESPACO
+            botao = pygame.Rect(x, r.top + 2, w, r.height - 4)
+            win98.caixa(self.tela, botao, saliente=(self.velocidade != mult))
+            desloca = 0 if self.velocidade != mult else 1  # "afunda" o texto
+            win98.escrever(self.tela, self.fonte_negrito, texto,
+                           (botao.left + 2 * A.ESPACO + desloca,
+                            botao.top + A.ESPACO - 2 + desloca))
+            self._botoes_velocidade.append((botao, mult))
+            x += w + 2
         sob_mouse = self.nome_sob_mouse()
         if sob_mouse:
-            partes.append(sob_mouse)
-        x = r.left + 2
-        for p in partes:
-            w = self.fonte.size(p)[0] + 4 * A.ESPACO
-            campo = pygame.Rect(x, r.top + 2, w, r.height - 4)
-            win98.relevo(self.tela, campo, saliente=False)
-            win98.escrever(self.tela, self.fonte, p,
-                           (campo.left + 2 * A.ESPACO, campo.top + A.ESPACO - 2))
-            x += w + 2
+            self._campo_status(r, x, sob_mouse)
+
+    def _campo_status(self, r: pygame.Rect, x: int, p: str) -> int:
+        """Um campo afundado da barra de baixo; devolve onde o próximo começa."""
+        w = self.fonte.size(p)[0] + 4 * A.ESPACO
+        campo = pygame.Rect(x, r.top + 2, w, r.height - 4)
+        win98.relevo(self.tela, campo, saliente=False)
+        win98.escrever(self.tela, self.fonte, p,
+                       (campo.left + 2 * A.ESPACO, campo.top + A.ESPACO - 2))
+        return x + w + 2
+
+    def clique_velocidade(self, pos) -> bool:
+        """Clique num botão de velocidade. Devolve True se foi num deles."""
+        for botao, mult in self._botoes_velocidade:
+            if botao.collidepoint(pos):
+                # Clicar no que já está ligado volta ao tempo normal (1x).
+                self.velocidade = 1 if self.velocidade == mult else mult
+                return True
+        return False
 
     def nome_sob_mouse(self):
         """Nome da entidade ou do material sob o mouse (só na aba Mapa)."""
@@ -466,6 +495,7 @@ class Genesis:
         secoes = [
             ("Simulação", [
                 f"Tempo: {s // 60:02d}:{s % 60:02d}",
+                f"Velocidade: {self.velocidade}x",
                 f"Maçãs no chão: {len(self.mundo.macas())}",
             ]),
             ("Vista", [
@@ -480,6 +510,7 @@ class Genesis:
                 "Clique (sem arrastar) — selecionar",
                 "I — trocar de aba (Mapa, NPCs, Info)",
                 "Esc — fechar o menu",
+                ">  >>  >>>>  (barra de baixo) — tempo 2x, 4x, 8x; clicar de novo volta a 1x",
             ]),
         ]
         x = campo.left + 3 * A.ESPACO
@@ -600,7 +631,8 @@ class Genesis:
                 if not arrastou:
                     self.clique_mapa(ev.pos)
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            if self.menu.clique(ev.pos) or self.abas.clique(ev.pos):
+            if (self.menu.clique(ev.pos) or self.abas.clique(ev.pos)
+                    or self.clique_velocidade(ev.pos)):
                 return
             conteudo = self.layout()[0]
             if not conteudo.collidepoint(ev.pos):
@@ -644,9 +676,10 @@ class Genesis:
         while self.rodando:
             for ev in pygame.event.get():
                 self.tratar_evento(ev)
-            # Tempo real: o motor anda exatamente o que passou no relógio.
+            # Tempo real: o motor anda exatamente o que passou no relógio,
+            # vezes a velocidade escolhida (1x, 2x, 4x ou 8x).
             dt_ms = relogio.tick(A.QUADROS_POR_SEGUNDO)
-            self.mundo.avancar(dt_ms / 1000.0)
+            self.mundo.avancar(dt_ms / 1000.0 * self.velocidade)
             self.desenhar()
         pygame.quit()
 

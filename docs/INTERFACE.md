@@ -38,7 +38,7 @@ terminal (rich), que foi apagada.
 │ │   aba Info: informações e atalhos     │ │           │ │
 │ │                                       │ │ Fome: 55  │ │
 │ └───────────────────────────────────────┘ └───────────┘ │
-│ [Tempo 01:15][NPC 2]                                    │ ← tempo + o que está sob o mouse
+│ [Tempo 01:15][>][>>][>>>>][NPC 2]                       │ ← tempo, velocidade, sob o mouse
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -50,6 +50,7 @@ terminal (rich), que foi apagada.
 | Mover a câmera | Setas (segurar repete), ou **clicar e arrastar** o mapa |
 | Zoom | `+` aproxima, `-` afasta (0,5x, 1x, 2x, 4x, 6x), ou a **rodinha** do mouse (para cima aproxima). `=` e o `+`/`-` do teclado numérico também servem |
 | Descer / subir de nível z | `Z` / `X` |
+| Acelerar o tempo | Botões ao lado do tempo: `>` 2x, `>>` 4x, `>>>>` 8x. O ligado fica afundado; clicar nele de novo volta a 1x |
 | Trocar de aba | Clique na aba, ou tecla `I` (Mapa → NPCs → Info) |
 | Menu | Clique em Arquivo; `Esc` fecha |
 
@@ -66,8 +67,16 @@ apertado, o mouse andou pelo menos 1 célula da tela, foi um **arraste**: a
 câmera se move junto ("pega e puxa": arrastar para a esquerda mostra o
 que está à direita) e nada é selecionado. Senão, foi um **clique**.
 
+### Velocidade do tempo
+Pedido em 14/11/2026: botões `>` (2x), `>>` (4x) e `>>>>` (8x) ao lado do
+tempo. A cada quadro o motor anda o tempo real que passou **vezes** a
+velocidade (`mundo.avancar(dt × velocidade)`). Como o motor é por eventos,
+acelerar não pula nada: tudo acontece na mesma ordem, só que mais rápido.
+Voltar a 1x ao clicar de novo no botão ligado foi decisão minha
+(PROVISÓRIO).
+
 ### Aba Info
-- **Simulação**: tempo e maçãs no chão.
+- **Simulação**: tempo, velocidade e maçãs no chão.
 - **Vista**: nível z, zoom e posição da câmera.
 - **Atalhos**: todos os atalhos de teclado e mouse da tabela acima.
 
