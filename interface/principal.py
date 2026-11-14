@@ -45,7 +45,9 @@ SIMBOLO_OCUPANTE = {
     int(gm.Ocupante.MACIEIRA): "🌳",
     int(gm.Ocupante.MACA): "🍎",
     int(gm.Ocupante.NPC): "🗿",
-    int(gm.Ocupante.CORPO): "💀",  # PROVISÓRIO: aguardando o dono escolher
+    # Corpo do NPC morto: cruz latina (U+271D), escolha do dono do projeto.
+    # Ela tem 1 coluna só; o espaço completa as 2 colunas da célula.
+    int(gm.Ocupante.CORPO): "✝ ",
 }
 
 NOME_ESTADO = {

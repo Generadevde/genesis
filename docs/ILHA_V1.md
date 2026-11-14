@@ -34,7 +34,7 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 ### NPCs 🗿
 - **4 NPCs**, fome inicial **100**.
 - **Fome 0 a 100**: 100 = satisfeito, 0 = faminto. **A cada 5 s, abaixa 3.**
-- Fome **0 → morre**, e **o corpo fica** no mapa.
+- Fome **0 → morre**, e **o corpo fica** no mapa, marcado com uma cruz **✝** (U+271D).
 - **Só come com fome abaixo de 70.**
 - Enxerga maçãs numa área de **32 × 32** em volta dele.
   Com várias à vista, vai na **mais próxima**.
@@ -85,4 +85,5 @@ Com o mapa de 128 × 128 (50 ilhas × 1 hora simulada, 200 NPCs):
 
 ## Em aberto
 
-- Símbolo do corpo do NPC morto: está **💀, provisório**, aguardando a escolha do dono.
+Nada no momento.
+
