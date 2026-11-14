@@ -104,7 +104,9 @@ void gerar_mundo(Mapa3D& mapa, std::uint64_t semente) {
                     }
                 } else {
                     const int topo = altura_em(x, y);
-                    if (z == topo) m = Material::Grama;
+                    if (z == topo)  // topo: grama, ou neve a partir de +4
+                        m = (topo >= cfg::NEVE_A_PARTIR_Z) ? Material::Neve
+                                                           : Material::Grama;
                     else if (z < topo && z >= cfg::TERRA_ATE_Z) m = Material::Terra;
                     else if (z < cfg::TERRA_ATE_Z) m = Material::Pedra;
                 }

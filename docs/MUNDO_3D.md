@@ -13,6 +13,7 @@ mundos, com as 3 dimensões **x, y, z**. Tamanho continua 128 × 128.
 | Material | Símbolo | Cor |
 |---|---|---|
 | Grama | `"` | verde |
+| Neve | `n` | branco |
 | Terra | `d` | marrom |
 | Pedra | `p` | cinza |
 | Água | `~` | azul |
@@ -20,7 +21,8 @@ mundos, com as 3 dimensões **x, y, z**. Tamanho continua 128 × 128.
 
 ### Camadas (leitura A)
 - **Terra** (o meio da ilha): a **superfície fica entre +1 e +4** (relevo).
-  O **topo é grama**; abaixo dela, **terra até o −3**; dali para baixo, **pedra**.
+  O **topo é grama** — **neve** se o topo está em **+4** (pedido em
+  14/11/2026); abaixo dela, **terra até o −3**; dali para baixo, **pedra**.
 - **Mar** (a borda de 8 células, que continua): **água do 0 até o −10**;
   abaixo, **pedra**.
 - Relevo **"médio"**. Mais pra frente vira opção editável.
@@ -47,7 +49,9 @@ Exemplo de coluna com morro de altura +3:
 
 ### Tela
 - **Z** desce um nível, **X** sobe um nível.
-- O que está **abaixo** do nível visto aparece **mais apagado ("desfocado")**.
+- O que está **abaixo** do nível visto aparece **com a cor normal**
+  (antes ficava apagado; o dono do projeto pediu para deixar normal em
+  14/11/2026).
 
 ## Como o código implementa
 
@@ -93,9 +97,9 @@ Exemplo de coluna com morro de altura +3:
 | `config.hpp` | `RELEVO_TAMANHO_MORRO` | 24 | tamanho médio de um morro, em células |
 | `config.hpp` | `RELEVO_CAMADAS` | 3 | camadas de detalhe somadas no relevo |
 | `aparencia.py` | `COR_TERRA` | (170, 85, 0) | o marrom da terra |
-| `aparencia.py` | `FATOR_APAGADO` | 0,45 | quanto escurece o que está abaixo |
 | `principal.py` | nível inicial da vista | +4 | a tela abre vendo do topo dos morros |
-| `principal.py` | ordem no zoom afastado | … água > terra > pedra > ar | onde entram terra e pedra |
+| `principal.py` | ordem no zoom afastado | … grama = neve > água > terra > pedra > ar | onde entram neve, terra e pedra |
+| `mundo.cpp` | macieiras na neve | permitido | macieiras e NPCs podem nascer em cima da neve |
 | `mapa3d.cpp` | vizinhos da água | 4 (N, S, L, O) | a água se espalha só em cruz, não na diagonal |
 | `mapa3d.cpp` | regra de espalhar | diferença ≥ 2, 1 nível por vizinho | quando e quanto a água passa para o lado |
 | `teste_definir` | — | — | função **só para testes** (cavar e despejar água à mão) |

@@ -26,6 +26,8 @@ inline constexpr int NIVEL_DO_MAR = 0;
 inline constexpr int SUPERFICIE_MIN = 1;
 inline constexpr int SUPERFICIE_MAX = 4;
 inline constexpr int TERRA_ATE_Z = -3;
+// Topo da superfície em +4 (o máximo) vira neve no lugar da grama.
+inline constexpr int NEVE_A_PARTIR_Z = 4;
 // Mar (borda de BORDA_AGUA células): água do nível 0 até o -10; abaixo, pedra.
 inline constexpr int MAR_FUNDO_Z = -10;
 

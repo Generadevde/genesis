@@ -5,7 +5,8 @@
 //   - Borda de BORDA_AGUA células = mar: água do nível 0 até o -10
 //     (cheia, nível 10); abaixo, pedra; acima, ar.
 //   - Terra (o meio): a superfície fica entre +1 e +4 (relevo "médio").
-//     Topo = grama; abaixo dela, terra até o -3; dali para baixo, pedra.
+//     Topo = grama (neve se o topo está em +4); abaixo dela, terra até o -3;
+//     dali para baixo, pedra.
 //
 // O relevo vem de "ruído suave": valores sorteados numa grade espaçada e
 // interpolados com suavidade entre os pontos (value noise), somando

@@ -45,6 +45,39 @@ def main() -> None:
         g.menu.aberto = 0 if passo % 30 == 0 else None
         g.desenhar()
         quadros += 1
+    # --- Mouse: arrastar move a câmera; clicar sem arrastar seleciona;
+    #     rodinha muda o zoom.
+    g.abas.ativa = 0
+    g.z_vista = 4
+    g.nivel_zoom = P.ESCALAS.index(1)
+    g.cam_x = g.cam_y = 20
+    g.desenhar()
+    area, cel = g._mapa_area, g._mapa_cel
+    meio = area.center
+
+    def evento(tipo, **dados):
+        g.tratar_evento(pygame.event.Event(tipo, **dados))
+
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=meio)
+    evento(pygame.MOUSEMOTION, pos=(meio[0] - 3 * cel, meio[1] - 2 * cel),
+           rel=(0, 0), buttons=(1, 0, 0))
+    evento(pygame.MOUSEBUTTONUP, button=1, pos=(meio[0] - 3 * cel, meio[1] - 2 * cel))
+    assert (g.cam_x, g.cam_y) == (23, 22), (g.cam_x, g.cam_y)
+    assert g.selecao is None  # arrastar não seleciona
+
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=meio)
+    evento(pygame.MOUSEBUTTONUP, button=1, pos=meio)
+    assert g.selecao is not None  # clique sem arrastar seleciona
+
+    evento(pygame.MOUSEWHEEL, x=0, y=1)
+    assert P.ESCALAS[g.nivel_zoom] == 0.5  # rodinha para cima: aproxima
+    evento(pygame.MOUSEWHEEL, x=0, y=-1)
+    evento(pygame.MOUSEWHEEL, x=0, y=-1)
+    assert P.ESCALAS[g.nivel_zoom] == 2    # para baixo: afasta
+    g.desenhar()
+    print("ok  mouse: arrastar move a câmera (sem selecionar), clique "
+          "seleciona, rodinha aproxima/afasta")
+
     g.nova_simulacao()
     g.desenhar()
     print(f"ok  interface: {quadros} quadros desenhados sem cair "

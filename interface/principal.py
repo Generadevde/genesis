@@ -55,6 +55,7 @@ MAT = gm.Material
 MATERIAL = {
     int(MAT.AR): (" ", A.FUNDO_MAPA, "Ar"),
     int(MAT.GRAMA): ('"', A.COR_GRAMA, "Grama"),
+    int(MAT.NEVE): ("n", A.COR_NEVE, "Neve"),
     int(MAT.TERRA): ("d", A.COR_TERRA, "Terra"),
     int(MAT.PEDRA): ("p", A.COR_PEDRA, "Pedra"),
     int(MAT.AGUA): ("~", A.COR_AGUA, "Água"),
@@ -83,22 +84,27 @@ COD_MATERIAL = 100
 
 # No zoom afastado aparece a coisa mais importante do bloco, nesta ordem:
 # NPC > corpo > maçã > macieira > grama > água (escolha do dono do projeto)
-# > terra > pedra > ar (PROVISÓRIO: terra e pedra vieram depois).
+# > terra > pedra > ar (PROVISÓRIO: terra e pedra vieram depois);
+# a neve fica junto da grama (PROVISÓRIO).
 PRIORIDADE = {
     int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
-    COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.AGUA): 4,
+    COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
+    COD_MATERIAL + int(MAT.AGUA): 4,
     COD_MATERIAL + int(MAT.TERRA): 3, COD_MATERIAL + int(MAT.PEDRA): 2,
     COD_MATERIAL + int(MAT.AR): 1,
 }
 
 
-def decodificar(byte_visao: int, ocupante: int):
-    """Byte da visão do motor -> (código, apagado). Ver Mundo::visao."""
+def decodificar(byte_visao: int, ocupante: int) -> int:
+    """Byte da visão do motor -> código do que aparece. Ver Mundo::visao.
+
+    O que está abaixo do nível visto aparece NORMAL, sem escurecer
+    (pedido do dono do projeto em 14/11/2026).
+    """
     material = byte_visao & 0x0F
-    apagado = bool(byte_visao & 0x10)
     if byte_visao & 0x20 and ocupante:
-        return ocupante, apagado
-    return COD_MATERIAL + material, apagado
+        return ocupante
+    return COD_MATERIAL + material
 
 
 class Simbolos:
@@ -125,18 +131,8 @@ class Simbolos:
             self._fontes_mapa[tamanho] = pygame.font.Font(A.FONTE_MAPA, tamanho)
         return self._fontes_mapa[tamanho]
 
-    def get(self, simbolo: str, lado: int, cor=A.PRETO,
-            apagado: bool = False) -> pygame.Surface:
-        """Símbolo no tamanho `lado`. `apagado` = escurecido (está abaixo
-        do nível que se está vendo)."""
-        if apagado:
-            chave = (simbolo, lado, cor, True)
-            if chave not in self._cache:
-                img = self.get(simbolo, lado, cor).copy()
-                f = round(255 * A.FATOR_APAGADO)
-                img.fill((f, f, f), special_flags=pygame.BLEND_RGB_MULT)
-                self._cache[chave] = img
-            return self._cache[chave]
+    def get(self, simbolo: str, lado: int, cor=A.PRETO) -> pygame.Surface:
+        """Símbolo no tamanho `lado`, na cor `cor` (emojis têm cor própria)."""
         chave = (simbolo, lado, cor)
         if chave not in self._cache:
             emoji = ord(simbolo[0]) > 0x1F000
@@ -182,6 +178,7 @@ class Genesis:
         self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs"])
 
         self.rodando = True
+        self._arraste = None  # clique-e-arraste do mapa em andamento
         self.nivel_zoom = ESCALAS.index(1)
         self.nova_simulacao()
 
@@ -258,14 +255,14 @@ class Genesis:
     # O que tem numa célula / num bloco
     # ------------------------------------------------------------------
     def codigo_bloco(self, vis: bytes, oc: bytes, x0: int, y0: int, lado: int):
-        """O que aparece num bloco lado x lado: (código, apagado, (x, y))."""
+        """O que aparece num bloco lado x lado: (código, (x, y))."""
         melhor = None
         for y in range(y0, min(y0 + lado, self.H)):
             base = y * self.L
             for x in range(x0, min(x0 + lado, self.L)):
-                cod, apag = decodificar(vis[base + x], oc[base + x])
+                cod = decodificar(vis[base + x], oc[base + x])
                 if melhor is None or PRIORIDADE[cod] > PRIORIDADE[melhor[0]]:
-                    melhor = (cod, apag, (x, y))
+                    melhor = (cod, (x, y))
         return melhor
 
     def npc_em(self, x: int, y: int):
@@ -295,10 +292,10 @@ class Genesis:
             for i, mx in enumerate(range(self.cam_x, self.cam_x + vis_l, lado)):
                 if lado == 1:  # zoom normal/aproximado: célula direta
                     k = my * self.L + mx
-                    cod, apagado = decodificar(vis[k], oc[k])
+                    cod = decodificar(vis[k], oc[k])
                 else:
-                    cod, apagado, _ = self.codigo_bloco(vis, oc, mx, my, lado)
-                img = self.imagem(cod, cel, apagado)
+                    cod, _ = self.codigo_bloco(vis, oc, mx, my, lado)
+                img = self.imagem(cod, cel)
                 if img is None:
                     continue
                 px = ox + i * cel + (cel - img.get_width()) // 2
@@ -323,15 +320,15 @@ class Genesis:
             texto += " (memória)"
         return texto
 
-    def imagem(self, cod: int, lado: int, apagado: bool):
+    def imagem(self, cod: int, lado: int):
         """Desenho de um código (ocupante ou material) no tamanho `lado`."""
         if cod >= COD_MATERIAL:
             simb, cor, _ = MATERIAL[cod - COD_MATERIAL]
             if simb == " ":
                 return None  # ar sem nada embaixo: fica preto
-            return self.simbolos.get(simb, lado, cor, apagado)
+            return self.simbolos.get(simb, lado, cor)
         cor = A.COR_CRUZ if cod == int(OC.CORPO) else A.PRETO
-        return self.simbolos.get(SIMBOLO[cod], lado, cor, apagado)
+        return self.simbolos.get(SIMBOLO[cod], lado, cor)
 
     def linhas_tabela(self):
         return [[f"NPC {n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
@@ -412,7 +409,7 @@ class Genesis:
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
         # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
-        fundo = A.FUNDO_MAPA if simb and simb in "\"dp~ " else A.FUNDO_CAMPO
+        fundo = A.FUNDO_MAPA if simb and simb in "\"ndp~ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
             img = self.simbolos.get(simb, A.TAM_SIMBOLO_GRANDE, cor)
@@ -433,7 +430,8 @@ class Genesis:
                   f"Maçãs no chão: {len(self.mundo.macas())}",
                   f"Zoom {zoom}",
                   f"Câmera ({self.cam_x}, {self.cam_y})",
-                  "Setas: mover   + / -: zoom   Z / X: descer / subir   I: trocar aba"]
+                  "Setas ou arrastar: mover   + / - ou rodinha: zoom   "
+                  "Z / X: descer / subir   I: trocar aba"]
         x = r.left + 2
         for p in partes:
             w = self.fonte.size(p)[0] + 4 * A.ESPACO
@@ -479,6 +477,23 @@ class Genesis:
         self.cam_x, self.cam_y = int(cx - vl / 2), int(cy - va / 2)
         self.limitar_camera(vl, va)
 
+    def arrastar(self, pos) -> None:
+        """Clicar e arrastar move a câmera, como as setas.
+
+        O mapa acompanha o mouse ("pega e puxa"): arrastar para a esquerda
+        mostra o que está à direita. Só conta como arraste depois de o
+        mouse andar pelo menos 1 célula da tela; antes disso, é um clique.
+        """
+        a = self._arraste
+        cel, lado = self._mapa_cel, self._mapa_lado
+        dx = int((pos[0] - a["inicio"][0]) / cel)
+        dy = int((pos[1] - a["inicio"][1]) / cel)
+        if dx == 0 and dy == 0 and not a["arrastou"]:
+            return
+        a["arrastou"] = True
+        self.cam_x = a["cam"][0] - dx * lado
+        self.cam_y = a["cam"][1] - dy * lado
+
     def clique_mapa(self, pos) -> None:
         area, cel, lado = self._mapa_area, self._mapa_cel, self._mapa_lado
         i = (pos[0] - area.left - 2) // cel
@@ -488,7 +503,7 @@ class Genesis:
             return
         vis = self.mundo.visao_bytes(self.z_vista)
         oc = self.mundo.ocupacao_bytes()
-        cod, _, (x, y) = self.codigo_bloco(vis, oc, mx, my, lado)
+        cod, (x, y) = self.codigo_bloco(vis, oc, mx, my, lado)
         if cod in (int(OC.NPC), int(OC.CORPO)):
             n = self.npc_em(x, y)
             if n:
@@ -503,6 +518,19 @@ class Genesis:
     def tratar_evento(self, ev) -> None:
         if ev.type == pygame.QUIT:
             self.sair()
+        elif ev.type == pygame.MOUSEWHEEL:
+            # Rodinha: para cima aproxima, para baixo afasta (como + e -).
+            if self.abas.nomes[self.abas.ativa] == "Mapa":
+                self.zoom(-1 if ev.y > 0 else +1)
+        elif ev.type == pygame.MOUSEMOTION and self._arraste is not None:
+            self.arrastar(ev.pos)
+        elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
+            # Soltou o botão no mapa: se não arrastou, foi um clique (seleciona).
+            if self._arraste is not None:
+                arrastou = self._arraste["arrastou"]
+                self._arraste = None
+                if not arrastou:
+                    self.clique_mapa(ev.pos)
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             if self.menu.clique(ev.pos) or self.abas.clique(ev.pos):
                 return
@@ -510,7 +538,9 @@ class Genesis:
             if not conteudo.collidepoint(ev.pos):
                 return
             if self.abas.nomes[self.abas.ativa] == "Mapa":
-                self.clique_mapa(ev.pos)
+                # Começa um possível arraste; a seleção só acontece ao soltar.
+                self._arraste = {"inicio": ev.pos, "cam": (self.cam_x, self.cam_y),
+                                 "arrastou": False}
             else:
                 for i, r in enumerate(getattr(self, "_linhas_rects", [])):
                     if r.collidepoint(ev.pos):

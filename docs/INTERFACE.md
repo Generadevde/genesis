@@ -18,9 +18,9 @@ terminal (rich), que foi apagada.
   grande** e, embaixo, **o que ele é**.
 - Símbolos continuam os mesmos: 🗿 NPC, 🌳 macieira, 🍎 maçã, ✝ corpo,
   `"` grama (verde), `~` água (azul); desde o mundo 3D, também `d` terra
-  (marrom) e `p` pedra (cinza).
-- **Mundo 3D**: a tela mostra **um nível z por vez**; o que está abaixo
-  aparece **apagado**. A barra de status mostra o nível. Clicar numa célula
+  (marrom), `p` pedra (cinza) e `n` neve (branco).
+- **Mundo 3D**: a tela mostra **um nível z por vez**; onde o nível é ar,
+  aparece o que está abaixo, **com a cor normal**. A barra de status mostra o nível. Clicar numa célula
   mostra o material, a posição (x, y, z) e, na água, o nível (ex.: 10/10).
   Ver [MUNDO_3D.md](MUNDO_3D.md).
 
@@ -43,9 +43,9 @@ terminal (rich), que foi apagada.
 
 | Ação | Como |
 |---|---|
-| Selecionar algo | Clique no mapa, ou numa linha da tabela NPCs |
-| Mover a câmera | Setas (segurar repete) |
-| Zoom | `+` aproxima, `-` afasta (0,5x, 1x, 2x, 4x, 6x). `=` e o `+`/`-` do teclado numérico também servem |
+| Selecionar algo | Clique (sem arrastar) no mapa, ou numa linha da tabela NPCs |
+| Mover a câmera | Setas (segurar repete), ou **clicar e arrastar** o mapa |
+| Zoom | `+` aproxima, `-` afasta (0,5x, 1x, 2x, 4x, 6x), ou a **rodinha** do mouse (para cima aproxima). `=` e o `+`/`-` do teclado numérico também servem |
 | Descer / subir de nível z | `Z` / `X` |
 | Trocar de aba | Clique na aba, ou tecla `I` |
 | Menu | Clique em Arquivo; `Esc` fecha |
@@ -56,6 +56,12 @@ e "Águas lembradas" (ver [MEMORIA.md](MEMORIA.md)).
 
 A seleção de um NPC acompanha o NPC enquanto ele anda (e vira o corpo ✝ se
 ele morrer: o painel mostra "Morreu de fome" ou "Morreu de sede").
+
+### Arrastar × clicar
+No mapa, a seleção acontece ao **soltar** o botão. Se, com o botão
+apertado, o mouse andou pelo menos 1 célula da tela, foi um **arraste**: a
+câmera se move junto ("pega e puxa": arrastar para a esquerda mostra o
+que está à direita) e nada é selecionado. Senão, foi um **clique**.
 
 ## Arquivos
 

@@ -40,7 +40,8 @@ void Mapa3D::definir(int x, int y, int z, Material m, int nivel_agua) {
 bool Mapa3D::e_terra(int x, int y) const {
     const int z = superficie(x, y);
     const Material m = material(x, y, z);
-    return m == Material::Grama || m == Material::Terra || m == Material::Pedra;
+    return m == Material::Grama || m == Material::Neve ||
+           m == Material::Terra || m == Material::Pedra;
 }
 
 void Mapa3D::recalcular_superficie(int x, int y) {

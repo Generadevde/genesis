@@ -49,14 +49,15 @@ def teste_mapa():
                 assert 1 <= sup <= 4, sup
                 alturas.add(sup)
                 assert w.material(x, y, sup + 1) == MAT.AR
-                assert w.material(x, y, sup) == MAT.GRAMA
+                # topo: grama; se está em +4, neve
+                assert w.material(x, y, sup) == (MAT.NEVE if sup == 4 else MAT.GRAMA)
                 for z in range(sup - 1, -4, -1):
                     assert w.material(x, y, z) == MAT.TERRA
                 assert w.material(x, y, -4) == MAT.PEDRA
                 assert w.material(x, y, -64) == MAT.PEDRA
     assert alturas == {1, 2, 3, 4}, alturas
     print("ok  mundo 128x128, z -64..+64; mar 0..-10 sobre pedra; terra com "
-          "relevo +1..+4: grama no topo, terra até -3, pedra abaixo")
+          "relevo +1..+4: grama no topo (neve em +4), terra até -3, pedra abaixo")
 
 
 def teste_inicio():
@@ -166,7 +167,7 @@ def teste_geral(sementes=50, duracao=3600):
             for n in vivos_:
                 assert w.ocupante(n.pos.x, n.pos.y) == O.NPC
                 assert n.pos.z == w.superficie(n.pos.x, n.pos.y)
-                assert w.material(n.pos.x, n.pos.y, n.pos.z) == MAT.GRAMA
+                assert w.material(n.pos.x, n.pos.y, n.pos.z) in (MAT.GRAMA, MAT.NEVE)
                 # Só vai comer com fome < 70, e só vai beber com sede < 50.
                 if n.estado == E.INDO_COMER:
                     assert n.fome < 70

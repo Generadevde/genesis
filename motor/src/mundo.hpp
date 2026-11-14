@@ -109,7 +109,7 @@ public:
     const std::vector<Ocupante>& ocupacao_bruta() const { return ocupacao_; }
     // O que se vê olhando o nível z de cima, 1 byte por coluna:
     //   bits 0-3: material visto (Material)
-    //   bit 4:    1 = está abaixo do nível z (mostrar apagado)
+    //   bit 4:    1 = está abaixo do nível z (hoje a tela mostra normal)
     //   bit 5:    1 = o ocupante da coluna (NPC, árvore...) aparece
     std::vector<std::uint8_t> visao(int z) const;
 
