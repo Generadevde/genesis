@@ -68,8 +68,7 @@ o ambiente Python (`.venv/`) for apagado.
 Rodar os testes:
 
 ```bash
-.venv/bin/python testes/teste_ilha.py
-.venv/bin/python testes/teste_interface.py
+./testes/rodar_todos.sh      # roda tudo e para no primeiro erro
 ```
 
 ## Estado atual (14/11/2026)

@@ -202,16 +202,24 @@ def teste_acoes(sementes=300, dt=0.1, duracao=1200):
             w.avancar(dt)
             for n in w.npcs():
                 est0, f0, s0 = antes[n.id]
-                if n.estado == E.COMENDO:
-                    assert n.fome == f0 or est0 != E.COMENDO  # não abaixa
-                    assert n.sede == s0 or est0 != E.COMENDO  # sede também não
-                if n.estado == E.BEBENDO:
-                    assert n.sede == s0 or est0 != E.BEBENDO  # não abaixa
-                if n.estado in (E.COMENDO, E.BEBENDO) and est0 != n.estado:
+                # Durante a ação a necessidade NÃO ABAIXA (pode subir, se uma
+                # ação termina e outra começa no mesmo instante).
+                if n.estado == E.COMENDO and est0 == E.COMENDO:
+                    assert n.fome >= f0 and n.sede >= s0
+                if n.estado == E.BEBENDO and est0 == E.BEBENDO:
+                    assert n.sede >= s0
+                # Fim de uma ação = o ganho aparece (fome +12 / sede +15),
+                # mesmo que outra ação igual comece no mesmo instante.
+                terminou = (n.id in inicio and n.estado != E.MORTO and (
+                    (inicio[n.id][0] == E.COMENDO and n.fome > f0) or
+                    (inicio[n.id][0] == E.BEBENDO and n.sede > s0 + 5)))
+                if (n.estado in (E.COMENDO, E.BEBENDO) and est0 != n.estado
+                        and not terminou):
                     inicio[n.id] = (n.estado, w.tempo, n.fome, n.sede)
-                elif n.id in inicio and n.estado not in (E.COMENDO, E.BEBENDO,
-                                                         E.MORTO):
+                elif terminou:
                     acao, t0, f, sd = inicio.pop(n.id)
+                    if n.estado == acao:  # já começou outra igual: conta dela
+                        inicio[n.id] = (acao, w.tempo, n.fome, n.sede)
                     dur = w.tempo - t0
                     assert 9.8 <= dur <= 10.2, dur
                     if acao == E.COMENDO:
