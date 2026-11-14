@@ -148,6 +148,10 @@ inline constexpr double NPC_PASSO_S = 1.0;
 // Subir ou descer 1 nível leva 5 s (em vez de 1 s). Mais de 1 nível, não sobe.
 inline constexpr double NPC_SUBIR_S = 5.0;
 inline constexpr int NPC_DEGRAU_MAX = 1;
+// Explorar (pedido em 14/11/2026): sem nada a resolver, o NPC escolhe um
+// destino a uma distância sorteada de 2 a 20 células e anda até lá.
+inline constexpr int EXPLORAR_DIST_MIN = 2;
+inline constexpr int EXPLORAR_DIST_MAX = 20;
 // Enxerga maçãs e água numa área de 32 x 32 células em volta dele.
 inline constexpr int VISAO_LADO = 32;
 

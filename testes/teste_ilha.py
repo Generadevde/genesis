@@ -511,6 +511,41 @@ def teste_vegetal():
           "em 3 dias; macieira seca aos 7 dias, fica 4 h cinza e some")
 
 
+def teste_explorar(sementes=20, duracao=300, dt=0.1):
+    """Explorar: cada destino novo fica a uma distância de 2 a 20 células de
+    onde o NPC estava quando escolheu; ele anda em direção a ele."""
+    destinos = aproximou = 0
+    for s in range(sementes):
+        w = gm.Mundo(70000 + s)
+        antes = {n.id: (n.tem_destino, (n.destino.x, n.destino.y), n.pos, n.estado)
+                 for n in w.npcs()}
+        # passo de 0,1 s: assim cada janela tem no máximo 1 passo do NPC
+        for _ in range(int(duracao / dt)):
+            w.avancar(dt)
+            for n in w.npcs():
+                tinha, d0, p0, e0 = antes[n.id]
+                novo = (n.destino.x, n.destino.y)
+                if n.tem_destino and (not tinha or novo != d0):
+                    destinos += 1
+                    # escolhido a partir de onde estava (antes do passo)
+                    dist = max(abs(novo[0] - p0.x), abs(novo[1] - p0.y))
+                    dist_agora = max(abs(novo[0] - n.pos.x), abs(novo[1] - n.pos.y))
+                    assert 2 <= dist <= 20 or 1 <= dist_agora <= 20, (dist, dist_agora)
+                # (só passos dados explorando: indo comer/beber/pegar, o
+                #  destino de exploração fica guardado e ele anda para outro lado)
+                moveu = (n.pos.x, n.pos.y) != (p0.x, p0.y)
+                if (tinha and n.tem_destino and novo == d0 and moveu and
+                        e0 == E.VAGANDO and n.estado == E.VAGANDO):
+                    a = max(abs(d0[0] - p0.x), abs(d0[1] - p0.y))
+                    b = max(abs(d0[0] - n.pos.x), abs(d0[1] - n.pos.y))
+                    assert b < a  # cada passo explorando aproxima do destino
+                    aproximou += 1
+                antes[n.id] = (n.tem_destino, novo, n.pos, n.estado)
+    assert destinos > 0 and aproximou > 0
+    print(f"ok  explorar: {destinos} destinos a 2–20 células; "
+          f"{aproximou} passos, todos aproximando do destino")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_relogio()
@@ -522,6 +557,7 @@ if __name__ == "__main__":
     teste_acoes()
     teste_memoria()
     teste_carregar()
+    teste_explorar()
     teste_vegetal()
     teste_relevo_npc()
     teste_agua()

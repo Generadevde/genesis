@@ -311,25 +311,67 @@ void Mundo::evento_passo(Npc& n) {
     //     pegar para levar consigo (pedido do dono do projeto).
     if (tentar_pegar(n)) return;
 
-    // --- Nada a resolver, ou nada à vista: anda aleatoriamente ----------
-    // Regra: não volta para a célula de onde acabou de sair.
+    // --- Nada a resolver, ou nada à vista: explora ---------------------
+    explorar(n);
+}
+
+// Explorar (pedido do dono do projeto; substitui o "andar à toa"):
+//   - sem destino (ou chegou nele): sorteia uma distância de 2 a 20 e, entre
+//     as células de terra que estão exatamente a essa distância, sorteia uma;
+//   - anda 1 passo para a vizinha que mais aproxima do destino;
+//   - se nenhum passo aproxima (barranco, água, alguém no caminho), larga o
+//     destino e, no passo seguinte, sorteia outro.
+void Mundo::explorar(Npc& n) {
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
     n.pela_memoria = false;
-    std::vector<Pos> opcoes;
+    if (!n.tem_destino || distancia_passos(n.pos, n.destino) == 0) {
+        if (!sortear_destino(n)) return;  // nenhum lugar possível: espera
+    }
+    const int agora = distancia_passos(n.pos, n.destino);
+    bool achou = false;
+    Pos melhor{};
+    int melhor_passos = 0, melhor_d2 = 0;
     for (Pos v : VIZINHOS) {
         Pos p = com_z({n.pos.x + v.x, n.pos.y + v.y});
         if (!pode_pisar(n.pos, p)) continue;
-        if (n.tem_anterior && p == n.anterior) continue;
-        opcoes.push_back(p);
+        const int ps = distancia_passos(p, n.destino), d2 = distancia2(p, n.destino);
+        if (!achou || ps < melhor_passos || (ps == melhor_passos && d2 < melhor_d2)) {
+            achou = true;
+            melhor = p;
+            melhor_passos = ps;
+            melhor_d2 = d2;
+        }
     }
-    if (opcoes.empty()) {
-        // Única saída é voltar? Então volta (melhor que ficar preso).
-        if (n.tem_anterior && pode_pisar(n.pos, n.anterior)) mover(n, n.anterior);
+    if (!achou || melhor_passos >= agora) {
+        n.tem_destino = false;  // não dá para chegar mais perto: outro destino
         return;
     }
+    mover(n, melhor);
+    if (distancia_passos(n.pos, n.destino) == 0) n.tem_destino = false;
+}
+
+bool Mundo::sortear_destino(Npc& n) {
+    std::uniform_int_distribution<int> dist(cfg::EXPLORAR_DIST_MIN, cfg::EXPLORAR_DIST_MAX);
+    const int r = dist(rng_);
+    std::vector<Pos> opcoes;
+    auto testar = [&](int x, int y) {
+        Pos p{x, y};
+        if (dentro(p) && mapa_.e_terra(x, y)) opcoes.push_back(com_z(p));
+    };
+    for (int dx = -r; dx <= r; ++dx) {
+        testar(n.pos.x + dx, n.pos.y - r);
+        testar(n.pos.x + dx, n.pos.y + r);
+    }
+    for (int dy = -r + 1; dy <= r - 1; ++dy) {
+        testar(n.pos.x - r, n.pos.y + dy);
+        testar(n.pos.x + r, n.pos.y + dy);
+    }
+    if (opcoes.empty()) return false;
     std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-    mover(n, opcoes[d(rng_)]);
+    n.destino = opcoes[d(rng_)];
+    n.tem_destino = true;
+    return true;
 }
 
 // Procura a maçã mais próxima à vista. Se está ao lado, começa a comer;

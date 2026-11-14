@@ -95,6 +95,8 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("estado", &Npc::estado)
         .def_readonly("falta_acao", &Npc::falta_acao)
         .def_readonly("pela_memoria", &Npc::pela_memoria)
+        .def_readonly("destino", &Npc::destino)
+        .def_readonly("tem_destino", &Npc::tem_destino)
         .def_readonly("alvo", &Npc::alvo)
         .def_readonly("macieiras_lembradas", &Npc::macieiras_lembradas)
         .def_readonly("aguas_lembradas", &Npc::aguas_lembradas);

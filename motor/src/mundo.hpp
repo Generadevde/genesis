@@ -111,6 +111,9 @@ struct Npc {
     Pos alvo;                  // maçã, água ou macieira do alvo atual
     bool tem_alvo = false;
     bool pela_memoria = false; // indo a um lugar lembrado (não visto agora)
+    // Explorar: destino escolhido (2 a 20 células) e se ainda está valendo.
+    Pos destino;
+    bool tem_destino = false;
 
     // --- Carregar (pedido em 14/11/2026) ---------------------------------
     // Vendo uma maçã, mesmo sem fome, ele pega e leva consigo. Carrega no
@@ -211,6 +214,8 @@ private:
     bool procurar_agua(const Npc& n, Pos& achada) const;
     bool tentar_comer(Npc& n);
     bool tentar_pegar(Npc& n);
+    void explorar(Npc& n);
+    bool sortear_destino(Npc& n);
     void lembrar_macieira(Npc& n, int arvore);
     bool soltar_maca_perto(Pos onde, int origem);
     bool camada_livres(Pos centro, int r, std::vector<Pos>& livres) const;

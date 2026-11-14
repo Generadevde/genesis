@@ -65,7 +65,7 @@ MATERIAL = {
 }
 
 NOME_ESTADO = {
-    EST.VAGANDO: "vagando",
+    EST.VAGANDO: "explorando",
     EST.INDO_COMER: "indo comer",
     EST.COMENDO: "comendo",
     EST.MORTO: "morto",
