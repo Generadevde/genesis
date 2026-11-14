@@ -19,6 +19,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # O pybind11 é encontrado pelo caminho que o script instalar.sh passa
 # (vem do pacote pybind11 instalado no ambiente Python do projeto).
+# PYBIND11_FINDPYTHON usa o jeito moderno do CMake de achar o Python.
+set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 
 # --- Motor: só simulação, sem nada de Python -------------------------------
