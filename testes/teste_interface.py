@@ -39,7 +39,7 @@ def main() -> None:
             g.tratar_evento(ev)
         g.mundo.avancar(1 / 60)
         # passa por abas, níveis, zoom e menu
-        g.abas.ativa = (passo // 40) % 2
+        g.abas.ativa = (passo // 40) % 3  # Mapa, NPCs, Info
         g.z_vista = [4, 2, 0, -5, -11, 4][passo // 40]
         g.nivel_zoom = passo % len(P.ESCALAS)
         g.menu.aberto = 0 if passo % 30 == 0 else None
@@ -77,6 +77,21 @@ def main() -> None:
     g.desenhar()
     print("ok  mouse: arrastar move a câmera (sem selecionar), clique "
           "seleciona, rodinha aproxima/afasta")
+
+    # --- Barra de baixo: nome do que está sob o mouse
+    from unittest import mock
+    g.nivel_zoom = P.ESCALAS.index(1)
+    n = g.mundo.npcs()[0]
+    g.cam_x, g.cam_y = max(0, n.pos.x - 5), max(0, n.pos.y - 5)
+    g.desenhar()
+    area, cel = g._mapa_area, g._mapa_cel
+    ponto = (area.left + 2 + (n.pos.x - g.cam_x) * cel + cel // 2,
+             area.top + 2 + (n.pos.y - g.cam_y) * cel + cel // 2)
+    with mock.patch("pygame.mouse.get_pos", return_value=ponto):
+        nome = g.nome_sob_mouse()
+        g.desenhar()
+    assert nome in (f"NPC {n.id + 1}", f"Corpo do NPC {n.id + 1}"), nome
+    print(f"ok  barra de baixo: tempo + nome sob o mouse ('{nome}')")
 
     g.nova_simulacao()
     g.desenhar()

@@ -13,7 +13,9 @@ terminal (rich), que foi apagada.
   - **Nova simulação** — começa o mundo de novo;
   - **Exibir** — mostra a tela com as informações (aba NPCs);
   - **Sair**.
-- **Barra de status embaixo**, como estava no desenho.
+- **Barra de status embaixo**: só o **tempo** e o **nome do que está sob o
+  mouse** (entidade ou material). As outras informações e os atalhos de
+  teclado ficam na aba **Info** (pedido em 14/11/2026).
 - **Clique num caractere**: aparece **à direita** um painel com o **símbolo
   grande** e, embaixo, **o que ele é**.
 - Símbolos continuam os mesmos: 🗿 NPC, 🌳 macieira, 🍎 maçã, ✝ corpo,
@@ -28,14 +30,15 @@ terminal (rich), que foi apagada.
 
 ```
 ┌ Arquivo ───────────────────────────────────────────────┐ ← barra de menus
-│ [Mapa][NPCs]                              ┌ Seleção ──┐ │ ← abas
+│ [Mapa][NPCs][Info]                        ┌ Seleção ──┐ │ ← abas
 │ ┌───────────────────────────────────────┐ │  ┌─────┐  │ │
 │ │                                       │ │  │ 🗿  │  │ │ ← símbolo grande
 │ │   aba Mapa: o mapa                    │ │  └─────┘  │ │
 │ │   aba NPCs: a tabela                  │ │ NPC 1     │ │ ← o que é
+│ │   aba Info: informações e atalhos     │ │           │ │
 │ │                                       │ │ Fome: 55  │ │
 │ └───────────────────────────────────────┘ └───────────┘ │
-│ [Tempo 01:15][Maçãs no chão: 6][Zoom 1x][Câmera (0,10)] │ ← barra de status
+│ [Tempo 01:15][NPC 2]                                    │ ← tempo + o que está sob o mouse
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -47,7 +50,7 @@ terminal (rich), que foi apagada.
 | Mover a câmera | Setas (segurar repete), ou **clicar e arrastar** o mapa |
 | Zoom | `+` aproxima, `-` afasta (0,5x, 1x, 2x, 4x, 6x), ou a **rodinha** do mouse (para cima aproxima). `=` e o `+`/`-` do teclado numérico também servem |
 | Descer / subir de nível z | `Z` / `X` |
-| Trocar de aba | Clique na aba, ou tecla `I` |
+| Trocar de aba | Clique na aba, ou tecla `I` (Mapa → NPCs → Info) |
 | Menu | Clique em Arquivo; `Esc` fecha |
 
 O painel de um NPC mostra também a **memória** dele (macieiras lembradas e
@@ -62,6 +65,11 @@ No mapa, a seleção acontece ao **soltar** o botão. Se, com o botão
 apertado, o mouse andou pelo menos 1 célula da tela, foi um **arraste**: a
 câmera se move junto ("pega e puxa": arrastar para a esquerda mostra o
 que está à direita) e nada é selecionado. Senão, foi um **clique**.
+
+### Aba Info
+- **Simulação**: tempo e maçãs no chão.
+- **Vista**: nível z, zoom e posição da câmera.
+- **Atalhos**: todos os atalhos de teclado e mouse da tabela acima.
 
 ## Arquivos
 

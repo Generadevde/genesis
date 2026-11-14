@@ -175,7 +175,7 @@ class Genesis:
                 ("Sair", self.sair),
             ]),
         ])
-        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs"])
+        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs", "Info"])
 
         self.rodando = True
         self._arraste = None  # clique-e-arraste do mapa em andamento
@@ -422,16 +422,13 @@ class Genesis:
             y += self.fonte.get_height() + A.ESPACO
 
     def desenhar_status(self, r: pygame.Rect) -> None:
+        """Barra de baixo: só o tempo e o nome do que está sob o mouse."""
         pygame.draw.rect(self.tela, A.CINZA, r)
         s = int(self.mundo.tempo)
-        zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
-        partes = [f"Tempo {s // 60:02d}:{s % 60:02d}",
-                  f"Nível z: {self.z_vista:+d}",
-                  f"Maçãs no chão: {len(self.mundo.macas())}",
-                  f"Zoom {zoom}",
-                  f"Câmera ({self.cam_x}, {self.cam_y})",
-                  "Setas ou arrastar: mover   + / - ou rodinha: zoom   "
-                  "Z / X: descer / subir   I: trocar aba"]
+        partes = [f"Tempo {s // 60:02d}:{s % 60:02d}"]
+        sob_mouse = self.nome_sob_mouse()
+        if sob_mouse:
+            partes.append(sob_mouse)
         x = r.left + 2
         for p in partes:
             w = self.fonte.size(p)[0] + 4 * A.ESPACO
@@ -440,6 +437,61 @@ class Genesis:
             win98.escrever(self.tela, self.fonte, p,
                            (campo.left + 2 * A.ESPACO, campo.top + A.ESPACO - 2))
             x += w + 2
+
+    def nome_sob_mouse(self):
+        """Nome da entidade ou do material sob o mouse (só na aba Mapa)."""
+        if self.abas.nomes[self.abas.ativa] != "Mapa" or self.menu.aberto is not None:
+            return None
+        achado = self.o_que_tem_em(pygame.mouse.get_pos())
+        if achado is None:
+            return None
+        cod, x, y, z = achado
+        if cod in (int(OC.NPC), int(OC.CORPO)):
+            n = self.npc_em(x, y)
+            if n:
+                return f"NPC {n.id + 1}" if cod == int(OC.NPC) else f"Corpo do NPC {n.id + 1}"
+        if cod == int(OC.MACIEIRA):
+            return "Macieira"
+        if cod == int(OC.MACA):
+            return "Maçã"
+        return MATERIAL[cod - COD_MATERIAL][2]
+
+    def desenhar_info(self, area: pygame.Rect) -> None:
+        """Aba Info: informações da simulação e atalhos de teclado."""
+        pygame.draw.rect(self.tela, A.CINZA, area)
+        campo = area.inflate(-2 * A.ESPACO, -2 * A.ESPACO)
+        win98.caixa(self.tela, campo, saliente=False, cor=A.FUNDO_CAMPO)
+        s = int(self.mundo.tempo)
+        zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
+        secoes = [
+            ("Simulação", [
+                f"Tempo: {s // 60:02d}:{s % 60:02d}",
+                f"Maçãs no chão: {len(self.mundo.macas())}",
+            ]),
+            ("Vista", [
+                f"Nível z: {self.z_vista:+d}",
+                f"Zoom: {zoom}",
+                f"Câmera: ({self.cam_x}, {self.cam_y})",
+            ]),
+            ("Atalhos", [
+                "Setas  ou  clicar e arrastar — mover o mapa",
+                "+ / -  ou  rodinha do mouse — zoom (aproximar / afastar)",
+                "Z / X — descer / subir um nível",
+                "Clique (sem arrastar) — selecionar",
+                "I — trocar de aba (Mapa, NPCs, Info)",
+                "Esc — fechar o menu",
+            ]),
+        ]
+        x = campo.left + 3 * A.ESPACO
+        y = campo.top + 2 * A.ESPACO
+        alt = self.fonte.get_height() + A.ESPACO
+        for titulo, linhas in secoes:
+            win98.escrever(self.tela, self.fonte_negrito, titulo, (x, y))
+            y += alt
+            for linha in linhas:
+                win98.escrever(self.tela, self.fonte, linha, (x + 2 * A.ESPACO, y))
+                y += alt
+            y += alt // 2
 
     def desenhar(self) -> None:
         # Pega a superfície ATUAL da janela. Quando a janela é maximizada ou
@@ -451,10 +503,13 @@ class Genesis:
         self.menu.desenhar(self.tela, self.tela.get_width())
         # Área de conteúdo com relevo; abas por cima, coladas nela.
         win98.caixa(self.tela, conteudo.inflate(4, 4))
-        if self.abas.nomes[self.abas.ativa] == "Mapa":
+        aba = self.abas.nomes[self.abas.ativa]
+        if aba == "Mapa":
             self.desenhar_mapa(conteudo)
-        else:
+        elif aba == "NPCs":
             self.desenhar_npcs(conteudo)
+        else:
+            self.desenhar_info(conteudo)
         self.abas.desenhar(self.tela, conteudo.left, abas_y)
         self.desenhar_painel(painel)
         self.desenhar_status(status)
@@ -494,25 +549,38 @@ class Genesis:
         self.cam_x = a["cam"][0] - dx * lado
         self.cam_y = a["cam"][1] - dy * lado
 
-    def clique_mapa(self, pos) -> None:
+    def o_que_tem_em(self, pos):
+        """O que aparece no ponto `pos` da tela, no mapa.
+
+        Devolve (código, x, y, z) — z é o nível da célula vista (olhando do
+        nível atual para baixo) — ou None se o ponto está fora do mapa.
+        """
+        if not hasattr(self, "_mapa_area") or not self._mapa_area.collidepoint(pos):
+            return None
         area, cel, lado = self._mapa_area, self._mapa_cel, self._mapa_lado
         i = (pos[0] - area.left - 2) // cel
         j = (pos[1] - area.top - 2) // cel
         mx, my = self.cam_x + i * lado, self.cam_y + j * lado
         if not (0 <= mx < self.L and 0 <= my < self.H):
-            return
+            return None
         vis = self.mundo.visao_bytes(self.z_vista)
         oc = self.mundo.ocupacao_bytes()
         cod, (x, y) = self.codigo_bloco(vis, oc, mx, my, lado)
+        z = self.z_vista
+        while z > gm.Z_MIN and self.mundo.material(x, y, z) == MAT.AR:
+            z -= 1
+        return cod, x, y, z
+
+    def clique_mapa(self, pos) -> None:
+        achado = self.o_que_tem_em(pos)
+        if achado is None:
+            return
+        cod, x, y, z = achado
         if cod in (int(OC.NPC), int(OC.CORPO)):
             n = self.npc_em(x, y)
             if n:
                 self.selecao = ("npc", n.id)
                 return
-        # Célula: o que se vê dali, olhando do nível atual para baixo.
-        z = self.z_vista
-        while z > gm.Z_MIN and self.mundo.material(x, y, z) == MAT.AR:
-            z -= 1
         self.selecao = ("celula", x, y, z)
 
     def tratar_evento(self, ev) -> None:
