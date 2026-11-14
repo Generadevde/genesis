@@ -8,7 +8,8 @@ Pedido pelo dono do projeto em 14/11/2026, antes da vida vegetal.
   Logo, **1 minuto do jogo = 1 s** e **1 dia = 24 horas = 24 minutos reais**
   (em velocidade 1x).
 - A **barra de baixo** mostra **dia e hora**: `Dia 1, 00:00`.
-- O jogo começa no **Dia 1, às 00:00** (`HORA_INICIAL`, PROVISÓRIO).
+- O jogo começa no **Dia 1, às 06:00** (`HORA_INICIAL`), quando o dia começa
+  (era 00:00; mudado com a temperatura — ver [HP_TEMPERATURA.md](HP_TEMPERATURA.md)).
 - Os botões de velocidade (`>` 2x, `>>` 4x, `>>>>` 8x) aceleram o relógio
   do jogo junto com todo o resto.
 
@@ -26,5 +27,5 @@ constantes — assim, mudar a escala do tempo muda tudo junto.
 
 ## Teste
 
-`teste_relogio` (em `testes/teste_ilha.py`): 0 s → Dia 1 00:00; 60 s →
-01:00; 24 min → Dia 2 00:00; e outros casos.
+`teste_relogio` (em `testes/teste_ilha.py`): 0 s → Dia 1 06:00; 60 s →
+07:00; 18 min → Dia 2 00:00; e outros casos.

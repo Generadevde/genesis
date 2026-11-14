@@ -12,4 +12,5 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Sistema de tempo: [docs/TEMPO.md](docs/TEMPO.md)
 - Nomes e carregar maçã: [docs/CARREGAR.md](docs/CARREGAR.md)
 - Vida vegetal: [docs/VIDA_VEGETAL.md](docs/VIDA_VEGETAL.md)
+- HP, urgência, dia/noite e temperatura: [docs/HP_TEMPERATURA.md](docs/HP_TEMPERATURA.md)
 - Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

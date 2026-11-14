@@ -4,6 +4,7 @@
 #include "mundo.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 
@@ -69,6 +70,7 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
         n.id = i;
         n.nome = cfg::NOMES_NPC[i];
         n.pos = sortear_grama_livre();
+        n.hp = cfg::HP_INICIAL;
         n.fome = cfg::FOME_INICIAL;
         n.sede = cfg::SEDE_INICIAL;
         n.falta_passo = cfg::NPC_PASSO_S;
@@ -151,6 +153,17 @@ void Mundo::avancar(double dt) {
         }
         if (!fila_.empty()) proximo = std::min(proximo, fila_.top().quando - tempo_);
         proximo = std::min(proximo, falta_agua_);
+        // A temperatura cruzando 4° / 5° (ou as 06:00) muda o HP e as
+        // decisões: é um acontecimento também.
+        proximo = std::min(proximo, proximo_marco_temperatura() - tempo_);
+        // HP: quando alguém perdendo vida chega a 0.
+        std::vector<double> taxas(npcs_.size(), 0.0);
+        for (size_t k = 0; k < npcs_.size(); ++k) {
+            const Npc& n = npcs_[k];
+            if (n.estado == EstadoNpc::Morto) continue;
+            taxas[k] = taxa_hp(n);
+            if (taxas[k] < 0) proximo = std::min(proximo, n.hp / -taxas[k]);
+        }
         proximo = std::max(proximo, 0.0);
 
         // 2) Anda o relógio até ele (ou até o fim do dt, o que vier antes).
@@ -164,6 +177,15 @@ void Mundo::avancar(double dt) {
             n.falta_passo -= passo;
             if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
                 n.falta_acao -= passo;
+        }
+        for (size_t k = 0; k < npcs_.size(); ++k) {
+            Npc& n = npcs_[k];
+            if (n.estado == EstadoNpc::Morto) continue;
+            n.hp = std::min(cfg::HP_MAXIMO, n.hp + taxas[k] * passo);
+            if (n.hp <= EPS) {  // HP chegou a 0: morre
+                n.hp = 0.0;
+                morrer(n);
+            }
         }
         falta_agua_ -= passo;
 
@@ -238,38 +260,33 @@ void Mundo::avancar(double dt) {
 // Acontecimentos
 // ===========================================================================
 
-// A cada 5 s: fome abaixa 3. Chegou a 0 -> morre.
+// A cada 5 s: fome abaixa 3, até 0.
 // Enquanto está comendo, a fome NÃO abaixa (pedido do dono do projeto).
 void Mundo::evento_fome(Npc& n) {
     if (n.estado == EstadoNpc::Comendo) return;
-    n.fome -= cfg::FOME_QUEDA;
-    if (n.fome <= cfg::FOME_MINIMA) {
-        n.fome = cfg::FOME_MINIMA;
-        morrer(n);
-    }
+    // Chegou a 0: fica em 0 (crítico — o NPC perde HP; ver taxa_hp).
+    n.fome = std::max(cfg::FOME_MINIMA, n.fome - cfg::FOME_QUEDA);
 }
 
-// A cada 5 s: sede abaixa 4. Chegou a 0 -> morre.
+// A cada 5 s: sede abaixa 4, até 0.
 // Enquanto está bebendo, a sede NÃO abaixa.
 void Mundo::evento_sede(Npc& n) {
     // Bebendo, a sede não abaixa; comendo maçã também não (a maçã mata a
     // sede um pouco — pedido do dono do projeto).
     if (n.estado == EstadoNpc::Bebendo || n.estado == EstadoNpc::Comendo) return;
-    n.sede -= cfg::SEDE_QUEDA;
-    if (n.sede <= cfg::SEDE_MINIMA) {
-        n.sede = cfg::SEDE_MINIMA;
-        morrer(n);
-    }
+    // Chegou a 0: fica em 0 (crítico — o NPC perde HP; ver taxa_hp).
+    n.sede = std::max(cfg::SEDE_MINIMA, n.sede - cfg::SEDE_QUEDA);
 }
 
 // A cada 1 s: o NPC decide e dá (no máximo) um passo.
 //
 // Ordem de decisão (definida pelo dono do projeto):
-//   - Com fome < 70 e sede < 50 ao mesmo tempo: tenta primeiro a MAIS BAIXA.
+//   - Com fome < 70 e sede < 50 ao mesmo tempo: tenta primeiro a mais URGENTE
+//     (a que fica crítica antes — tempo até chegar a 0).
 //     Se não achar o que ela pede (ex.: nenhuma água à vista), tenta a outra.
 //   - Só uma baixa: tenta só ela.
 //   - Nada à vista (ou nada baixo): anda aleatoriamente.
-// Empate (fome == sede): a sede vem primeiro — PROVISÓRIO, aguardando o dono.
+// Empate: a sede vem primeiro — PROVISÓRIO, aguardando o dono.
 void Mundo::evento_passo(Npc& n) {
     if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
         return;  // ocupado: fica parado
@@ -277,7 +294,9 @@ void Mundo::evento_passo(Npc& n) {
     const bool com_fome = n.fome < cfg::FOME_LIMITE_COMER;
     const bool com_sede = n.sede < cfg::SEDE_LIMITE_BEBER;
     if (com_fome && com_sede) {
-        if (n.sede <= n.fome) {
+        // Prioridade pela URGÊNCIA: a que vai ficar crítica antes vem
+        // primeiro (decisão do dono do projeto).
+        if (ate_critico_sede(n) <= ate_critico_fome(n)) {
             if (tentar_beber(n) || tentar_comer(n)) return;
         } else {
             if (tentar_comer(n) || tentar_beber(n)) return;
@@ -659,6 +678,86 @@ Mundo::Relogio Mundo::relogio() const {
     return r;
 }
 
+// --- Dia, noite, temperatura, HP -------------------------------------------
+
+// Hora do dia (0 a 24, com fração) no tempo t da simulação.
+double Mundo::hora_do_dia(double t) const {
+    const double total_h = t / cfg::SEGUNDOS_POR_HORA + cfg::HORA_INICIAL;
+    return std::fmod(total_h, static_cast<double>(cfg::HORAS_POR_DIA));
+}
+
+bool Mundo::e_dia() const {
+    const double h = hora_do_dia(tempo_);
+    return h >= cfg::DIA_COMECA_H && h < cfg::NOITE_COMECA_H;
+}
+
+// Temperatura em linha reta entre os pontos do config.hpp (dando a volta
+// na meia-noite: depois do último ponto vem o primeiro do dia seguinte).
+double Mundo::temperatura_em(double t) const {
+    const double h = hora_do_dia(t);
+    for (int k = 0; k < cfg::TEMP_PONTOS; ++k) {
+        const int prox = (k + 1) % cfg::TEMP_PONTOS;
+        double h0 = cfg::TEMP_HORAS[k], h1 = cfg::TEMP_HORAS[prox];
+        double hh = h;
+        if (h1 <= h0) {  // trecho que passa da meia-noite
+            h1 += cfg::HORAS_POR_DIA;
+            if (hh < h0) hh += cfg::HORAS_POR_DIA;
+        }
+        if (hh >= h0 && hh < h1) {
+            const double f = (hh - h0) / (h1 - h0);
+            return cfg::TEMP_GRAUS[k] + f * (cfg::TEMP_GRAUS[prox] - cfg::TEMP_GRAUS[k]);
+        }
+    }
+    return cfg::TEMP_GRAUS[0];
+}
+
+// Próximo momento em que a temperatura cruza 4° ou 5°, ou que dá 06:00.
+// Procura de minuto em minuto do jogo e afina no fim (a curva é feita de
+// retas, então isso acha o cruzamento com folga de precisão).
+double Mundo::proximo_marco_temperatura() const {
+    if (marco_temp_ > tempo_ + 1e-9) return marco_temp_;  // ainda vale
+    const double passo = cfg::SEGUNDOS_POR_HORA / 60.0;  // 1 minuto do jogo
+    auto lado = [&](double t, double limite) { return temperatura_em(t) < limite; };
+    // 06:00 (quando o NPC sai do abrigo)
+    double h = hora_do_dia(tempo_);
+    double faltam_h = cfg::DIA_COMECA_H - h;
+    if (faltam_h <= 1e-9) faltam_h += cfg::HORAS_POR_DIA;
+    double melhor = tempo_ + faltam_h * cfg::SEGUNDOS_POR_HORA;
+    for (double limite : {cfg::TEMP_CRITICA, cfg::TEMP_FRIO}) {
+        const bool agora = lado(tempo_ + 1e-6, limite);
+        for (double t = tempo_ + passo; t < melhor; t += passo) {
+            if (lado(t, limite) != agora) {
+                double a = t - passo, b = t;  // afina por bisseção
+                for (int i = 0; i < 40; ++i) {
+                    const double m = (a + b) / 2;
+                    (lado(m, limite) != agora ? b : a) = m;
+                }
+                melhor = std::min(melhor, b);
+                break;
+            }
+        }
+    }
+    marco_temp_ = melhor;
+    return melhor;
+}
+
+// HP: −5/s por necessidade no crítico (fome 0, sede 0, frio < 4°).
+double Mundo::taxa_hp(const Npc& n) const {
+    int criticos = 0;
+    if (n.fome <= cfg::FOME_MINIMA) ++criticos;
+    if (n.sede <= cfg::SEDE_MINIMA) ++criticos;
+    if (temperatura() < cfg::TEMP_CRITICA) ++criticos;
+    return -cfg::HP_DANO_POR_CRITICO_S * criticos;
+}
+
+double Mundo::ate_critico_fome(const Npc& n) const {
+    return n.fome / (cfg::FOME_QUEDA / cfg::FOME_INTERVALO_S);
+}
+
+double Mundo::ate_critico_sede(const Npc& n) const {
+    return n.sede / (cfg::SEDE_QUEDA / cfg::SEDE_INTERVALO_S);
+}
+
 int Mundo::largura() const { return cfg::LARGURA; }
 int Mundo::altura() const { return cfg::ALTURA; }
 
@@ -782,6 +881,9 @@ void Mundo::morrer(Npc& n) {
         if (it != quando_muda_.end() && it->second <= tempo_ + EPS)
             evento_maca_vira_muda(i);
     }
+    n.causa_morte = (n.fome <= cfg::FOME_MINIMA ? 1 : 0) |
+                    (n.sede <= cfg::SEDE_MINIMA ? 2 : 0) |
+                    (temperatura() < cfg::TEMP_CRITICA ? 4 : 0);
     n.estado = EstadoNpc::Morto;
     n.tem_alvo = false;
     n.comendo_da_mao = false;

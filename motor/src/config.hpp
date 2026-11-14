@@ -22,8 +22,35 @@ inline constexpr int BORDA_AGUA = 8;
 inline constexpr double SEGUNDOS_POR_HORA = 60.0;
 inline constexpr int HORAS_POR_DIA = 24;
 inline constexpr double SEGUNDOS_POR_DIA = SEGUNDOS_POR_HORA * HORAS_POR_DIA;
-// O jogo começa no Dia 1, a esta hora (PROVISÓRIO).
-inline constexpr int HORA_INICIAL = 0;
+// O jogo começa no Dia 1, às 06:00 — quando o dia começa (regra do dono).
+// (Era 00:00; mudado porque à 00:00 já faz frio crítico.)
+inline constexpr int HORA_INICIAL = 6;
+
+// --- Dia, noite e temperatura (pedido em 14/11/2026) ----------------------
+// Dia das 06:00 às 18:00; o resto é noite.
+inline constexpr double DIA_COMECA_H = 6.0;
+inline constexpr double NOITE_COMECA_H = 18.0;
+// Temperatura (uma só para o mundo todo, por enquanto), em °C. Muda aos
+// poucos, em linha reta entre estes pontos (hora do dia, temperatura):
+//   04:00  2°  -> sobe até 14:00  28° -> fica até 18:00  28° -> cai até 22:00  2°
+//   -> fica 2° até as 04:00 do dia seguinte.
+inline constexpr int TEMP_PONTOS = 4;
+inline constexpr double TEMP_HORAS[TEMP_PONTOS] = {4.0, 14.0, 18.0, 22.0};
+inline constexpr double TEMP_GRAUS[TEMP_PONTOS] = {2.0, 28.0, 28.0, 2.0};
+// A partir de 5° é "frio": o NPC vai para o abrigo.
+inline constexpr double TEMP_FRIO = 5.0;
+// Abaixo de 4° é crítico: quem está fora do abrigo perde HP.
+inline constexpr double TEMP_CRITICA = 4.0;
+
+// --- HP (vida) --------------------------------------------------------------
+// 0 a 100, começa em 100. Morre com HP 0.
+inline constexpr double HP_MAXIMO = 100.0;
+inline constexpr double HP_INICIAL = 100.0;
+// Cada necessidade no crítico (fome 0, sede 0, temperatura < 4° fora do
+// abrigo) tira 5 de HP por segundo; as que estão no crítico se somam.
+inline constexpr double HP_DANO_POR_CRITICO_S = 5.0;
+// Dormindo no abrigo, recupera 1 de HP por segundo.
+inline constexpr double HP_RECUPERA_ABRIGO_S = 1.0;
 
 // --- Mundo em 3 dimensões (pedido em 14/11/2026) -------------------------
 // Níveis z de -64 a +64; o nível 0 é o nível do mar.
@@ -69,7 +96,8 @@ inline constexpr int MACAS_CARREGAVEIS = 1;
 inline constexpr int NUM_MACIEIRAS = 6;
 
 // --- Fome -----------------------------------------------------------------
-// Vai de 0 (faminto) a 100 (satisfeito). Em 0 o NPC morre.
+// Vai de 0 (faminto) a 100 (satisfeito). Em 0 é crítico: o NPC perde HP
+// (antes do HP, morria em 0).
 inline constexpr double FOME_MAXIMA   = 100.0;
 inline constexpr double FOME_MINIMA   = 0.0;
 inline constexpr double FOME_INICIAL  = 100.0;
@@ -80,7 +108,7 @@ inline constexpr double FOME_QUEDA       = 3.0;
 inline constexpr double FOME_LIMITE_COMER = 70.0;
 
 // --- Sede (pedida em 14/11/2026) -----------------------------------------
-// Igual à fome: vai de 0 a 100, começa em 100, em 0 o NPC morre.
+// Igual à fome: vai de 0 a 100, começa em 100, em 0 é crítico (perde HP).
 inline constexpr double SEDE_MAXIMA  = 100.0;
 inline constexpr double SEDE_MINIMA  = 0.0;
 inline constexpr double SEDE_INICIAL = 100.0;

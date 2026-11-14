@@ -375,7 +375,7 @@ class Genesis:
                                  cinza=(cod == int(OC.MACIEIRA_SECA)))
 
     def linhas_tabela(self):
-        return [[n.nome, f"{n.fome:.0f}", f"{n.sede:.0f}",
+        return [[n.nome, f"{n.hp:.0f}", f"{n.fome:.0f}", f"{n.sede:.0f}",
                  self.texto_estado(n), f"({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
                  self.texto_carregando(n),
                  str(len(n.macieiras_lembradas)), str(len(n.aguas_lembradas))]
@@ -386,7 +386,7 @@ class Genesis:
         sel = self.selecao[1] if self.selecao and self.selecao[0] == "npc" else None
         self._linhas_rects = win98.tabela(
             self.tela, area.inflate(-2 * A.ESPACO, -2 * A.ESPACO), self.fonte,
-            ["NPC", "Fome", "Sede", "Estado", "Posição", "Carregando",
+            ["NPC", "HP", "Fome", "Sede", "Estado", "Posição", "Carregando",
              "Macieiras lembradas", "Águas lembradas"],
             self.linhas_tabela(), selecionada=sel)
 
@@ -397,11 +397,14 @@ class Genesis:
         if self.selecao[0] == "npc":
             n = self.mundo.npcs()[self.selecao[1]]
             if n.estado == EST.MORTO:
-                causa = "fome" if n.fome == 0 else "sede"
+                causas = [c for bit, c in ((1, "fome"), (2, "sede"), (4, "frio"))
+                          if n.causa_morte & bit]
+                causa = " e ".join(causas) if causas else "?"
                 return "✝", A.PRETO, [f"Corpo de {n.nome}",
-                                      f"Morreu de {causa}",
+                                      f"Morreu (HP 0) de: {causa}",
                                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})"]
             linhas = [n.nome,
+                      f"HP: {n.hp:.0f}",
                       f"Fome: {n.fome:.0f}",
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
@@ -486,6 +489,10 @@ class Genesis:
             win98.escrever(self.tela, f, linha, (r.left + 2 * A.ESPACO, y))
             y += self.fonte.get_height() + A.ESPACO
 
+    def texto_temperatura(self) -> str:
+        periodo = "dia" if self.mundo.e_dia() else "noite"
+        return f"{self.mundo.temperatura():.1f} °C ({periodo})"
+
     def texto_relogio(self) -> str:
         """Dia e hora do jogo (1 h = 60 s; ver config.hpp)."""
         r = self.mundo.relogio()
@@ -496,6 +503,9 @@ class Genesis:
         pygame.draw.rect(self.tela, A.CINZA, r)
         x = r.left + 2
         x = self._campo_status(r, x, self.texto_relogio())
+        # Temperatura (uma só para o mundo todo, por enquanto) — é a do
+        # lugar onde o mouse está, já que hoje é igual em todo lugar.
+        x = self._campo_status(r, x, self.texto_temperatura())
         # Botões de velocidade: o ligado fica afundado.
         self._botoes_velocidade = []
         for texto, mult in VELOCIDADES:
@@ -563,6 +573,7 @@ class Genesis:
                 f"Tempo: {self.texto_relogio()}  (1 hora do jogo = "
                 f"{gm.SEGUNDOS_POR_HORA:.0f} s)",
                 f"Velocidade: {self.velocidade}x",
+                f"Temperatura: {self.texto_temperatura()}",
                 f"Maçãs no chão: {len(self.mundo.macas())}",
             ]),
             ("Vista", [

@@ -88,6 +88,8 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("macas_carregadas", &Npc::macas_carregadas)
         .def_readonly("comendo_da_mao", &Npc::comendo_da_mao)
         .def_readonly("pos", &Npc::pos)
+        .def_readonly("hp", &Npc::hp)
+        .def_readonly("causa_morte", &Npc::causa_morte)
         .def_readonly("fome", &Npc::fome)
         .def_readonly("sede", &Npc::sede)
         .def_readonly("estado", &Npc::estado)
@@ -104,6 +106,8 @@ PYBIND11_MODULE(genesis_motor, m) {
 
     m.attr("SEGUNDOS_POR_HORA") = config::SEGUNDOS_POR_HORA;
     m.attr("SEGUNDOS_POR_DIA") = config::SEGUNDOS_POR_DIA;
+    m.attr("TEMP_CRITICA") = config::TEMP_CRITICA;
+    m.attr("TEMP_FRIO") = config::TEMP_FRIO;
 
     py::class_<Mundo>(m, "Mundo")
         .def(py::init<std::uint64_t>(), py::arg("semente"))
@@ -113,6 +117,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_property_readonly("altura", &Mundo::altura)
         .def_property_readonly("tempo", &Mundo::tempo)
         .def("relogio", &Mundo::relogio, "Dia, hora e minuto do jogo.")
+        .def("temperatura", &Mundo::temperatura, "Temperatura agora (°C).")
+        .def("e_dia", &Mundo::e_dia, "É dia (06:00–18:00)?")
+        .def("taxa_hp", &Mundo::taxa_hp, py::arg("npc"))
         .def("ocupante", &Mundo::ocupante, py::arg("x"), py::arg("y"))
         .def("material", [](const Mundo& w, int x, int y, int z) {
             return w.mapa().material(x, y, z);

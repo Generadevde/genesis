@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.7: vida vegetal (docs/VIDA_VEGETAL.md).
-    return "Genesis — motor 0.7 (vida vegetal)";
+    // Versão 0.8: HP, urgência e temperatura (docs/HP_TEMPERATURA.md).
+    return "Genesis — motor 0.8 (HP, temperatura)";
 }
 
 }  // namespace genesis

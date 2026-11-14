@@ -98,6 +98,9 @@ struct Npc {
     Pos pos;
     Pos anterior;              // de onde veio no último passo
     bool tem_anterior = false; // falso até dar o primeiro passo
+    double hp = 0.0;           // vida: 0 a 100; morre com 0
+    // O que estava no crítico quando morreu (soma): 1 = fome, 2 = sede, 4 = frio.
+    int causa_morte = 0;
     double fome = 0.0;
     double sede = 0.0;
     double falta_passo = 0.0;  // segundos até o próximo passo
@@ -140,6 +143,15 @@ public:
     // Relógio do jogo (1 h = 60 s; ver config.hpp). Dia começa em 1.
     struct Relogio { int dia; int hora; int minuto; };
     Relogio relogio() const;
+    // Temperatura do mundo agora (°C) e se é dia (06:00–18:00).
+    double temperatura() const { return temperatura_em(tempo_); }
+    double temperatura_em(double t) const;
+    bool e_dia() const;
+    // Quanto de HP o NPC está perdendo (negativo) ou ganhando por segundo.
+    double taxa_hp(const Npc& n) const;
+    // Segundos até a necessidade ficar crítica (urgência; 0 = já está).
+    double ate_critico_fome(const Npc& n) const;
+    double ate_critico_sede(const Npc& n) const;
     Ocupante ocupante(int x, int y) const;
     const Mapa3D& mapa() const { return mapa_; }
     const std::vector<Macieira>& macieiras() const { return macieiras_; }
@@ -177,6 +189,8 @@ private:
     void evento_maca_vira_muda(int indice_celula);
     void evento_muda_vira_arvore(int id_muda);
     void agendar(double quando, int tipo, int alvo);
+    double hora_do_dia(double t) const;
+    double proximo_marco_temperatura() const;
     void ocupar(int indice_celula, Ocupante novo);
     void contar_livres();
     void evento_macieira_seca(Macieira& m);
@@ -210,6 +224,8 @@ private:
 
     double tempo_ = 0.0;
     double falta_agua_ = 0.0;  // segundos até o próximo passo da água
+    // Próximo cruzamento de 4°/5° ou 06:00 (guardado; recalculado quando passa).
+    mutable double marco_temp_ = -1.0;
     std::mt19937_64 rng_;
     Mapa3D mapa_;
     std::vector<Ocupante> ocupacao_;

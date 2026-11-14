@@ -130,23 +130,53 @@ def teste_quedas():
 
 
 def teste_morte_sem_nada():
-    # Sem beber, 100 cai 4 a cada 5 s: chega a 0 na 25ª queda = 125 s
-    # (antes da fome, que levaria 170 s).
+    """Sede chega a 0 aos 125 s; aí perde 5 de HP por segundo e morre com
+    HP 0 aos 145 s (se nada mais estiver crítico)."""
     testados = 0
     for s in range(200):
         w = gm.Mundo(5000 + s)
-        w.avancar(124.999)
-        candidatos = [n.id for n in w.npcs()
-                      if abs(n.sede - 4) < 1e-9
-                      and n.estado not in (E.MORTO, E.BEBENDO, E.COMENDO)]
+        w.avancar(144.999)
+        # quem passou de 125 s a 145 s com sede 0 o tempo todo tem HP ~0
+        candidatos = [n.id for n in w.npcs() if n.estado != E.MORTO and
+                      n.sede == 0 and abs(n.hp - 0.005) < 1e-6]
         w.avancar(0.002)
         for n in w.npcs():
             if n.id in candidatos:
-                assert n.estado == E.MORTO and n.sede == 0
+                assert n.estado == E.MORTO and n.hp == 0
+                assert n.causa_morte == 2  # sede
                 assert w.ocupante(n.pos.x, n.pos.y) == O.CORPO
                 testados += 1
     assert testados > 0
-    print(f"ok  sem beber, morre aos 125 s e o corpo fica ({testados} NPCs)")
+    print(f"ok  sede 0 aos 125 s -> perde 5 HP/s -> morre com HP 0 aos 145 s, "
+          f"corpo fica ({testados} NPCs)")
+
+
+def teste_hp():
+    """HP: −5/s por necessidade no crítico (fome 0, sede 0, frio < 4°),
+    somando; nunca passa de 100 nem fica abaixo de 0."""
+    vistos = {0: 0, 1: 0, 2: 0, 3: 0}
+    for s in range(40):
+        w = gm.Mundo(60000 + s)
+        while w.tempo < 20 * 60 and any(n.estado != E.MORTO for n in w.npcs()):
+            antes = [(n.hp, w.taxa_hp(n), n.estado, n.fome, n.sede) for n in w.npcs()]
+            t0 = w.tempo
+            w.avancar(0.1)
+            for n, (hp0, taxa, e0, f0, s0) in zip(w.npcs(), antes):
+                assert 0 <= n.hp <= 100
+                if e0 == E.MORTO:
+                    continue
+                criticos = (f0 == 0) + (s0 == 0) + (w.temperatura() < 4)
+                vistos[criticos] = vistos.get(criticos, 0) + 1
+                # se nada mudou no meio do passo (fome, sede, estado, nem a
+                # temperatura cruzou 4°), o HP anda exatamente na taxa
+                mudou = n.fome != f0 or n.sede != s0 or n.estado != e0
+                # (w.taxa_hp(n) == taxa garante que a temperatura não cruzou 4°)
+                if not mudou and n.estado != E.MORTO and w.taxa_hp(n) == taxa:
+                    assert abs(taxa + 5 * criticos) < 1e-9, (taxa, criticos)
+                    assert abs((n.hp - min(100, hp0 + taxa * 0.1))) < 1e-6, (hp0, n.hp, taxa)
+    assert vistos.get(1, 0) > 0
+    print(f"ok  HP: −5/s por necessidade crítica (somando); vistos com "
+          f"0/1/2/3 críticos: {vistos[0]}/{vistos[1]}/{vistos[2]}/{vistos.get(3, 0)}")
 
 
 def teste_maca_em_volta():
@@ -232,7 +262,7 @@ def teste_geral(sementes=50, duracao=3600):
             for n in npcs:
                 assert 0 <= n.fome <= 100 and 0 <= n.sede <= 100
                 if n.estado == E.MORTO:
-                    assert n.fome == 0 or n.sede == 0
+                    assert n.hp == 0 and n.causa_morte != 0
                 f0, s0 = antes[n.id]
                 if n.fome > f0:  # +12 (ou +9 se a fome caiu no mesmo segundo)
                     assert n.fome - f0 in (12, 9) or n.fome == 100, n.fome - f0
@@ -408,18 +438,30 @@ def teste_carregar(sementes=60, duracao=1800):
 
 
 def teste_relogio():
-    """1 hora do jogo = 60 s; o jogo começa no Dia 1, 00:00."""
+    """1 hora do jogo = 60 s; o jogo começa no Dia 1, 06:00."""
     w = gm.Mundo(1)
-    casos = [(0, (1, 0, 0)), (1, (1, 0, 1)), (59.5, (1, 0, 59)), (60, (1, 1, 0)),
-             (23 * 60 + 59, (1, 23, 59)), (24 * 60, (2, 0, 0)),
-             (3 * 24 * 60 + 5 * 60 + 7, (4, 5, 7))]
+    casos = [(0, (1, 6, 0)), (1, (1, 6, 1)), (59.5, (1, 6, 59)), (60, (1, 7, 0)),
+             (17 * 60 + 59, (1, 23, 59)), (18 * 60, (2, 0, 0)),
+             (3 * 24 * 60 + 5 * 60 + 7, (4, 11, 7))]
     feito = 0.0
     for t, (dia, hora, minuto) in casos:
         w.avancar(t - feito)
         feito = t
         r = w.relogio()
         assert (r.dia, r.hora, r.minuto) == (dia, hora, minuto), (t, r.dia, r.hora, r.minuto)
-    print("ok  relógio: 1 h = 60 s, 1 dia = 24 min reais; começa no Dia 1, 00:00")
+    # Temperatura: 2° de 22h às 04h, sobe até 28° às 14h, fica até 18h, cai
+    # até 2° às 22h. Dia das 06h às 18h.
+    def em(hora):
+        x = gm.Mundo(1)
+        x.avancar(((hora - 6) % 24) * 60)
+        return x.temperatura(), x.e_dia()
+    for hora, graus, dia in [(4, 2, False), (9, 15, True), (14, 28, True),
+                             (16, 28, True), (18, 28, False), (20, 15, False),
+                             (22, 2, False), (1, 2, False), (6, 7.2, True)]:
+        t, d = em(hora)
+        assert abs(t - graus) < 1e-6 and d == dia, (hora, t, d)
+    print("ok  relógio: 1 h = 60 s, começa no Dia 1, 06:00; temperatura "
+          "2°(22h–04h) ↗ 28°(14h–18h) ↘; dia 06h–18h")
 
 
 def teste_vegetal():
@@ -476,6 +518,7 @@ if __name__ == "__main__":
     teste_quedas()
     teste_maca_em_volta()
     teste_morte_sem_nada()
+    teste_hp()
     teste_acoes()
     teste_memoria()
     teste_carregar()
