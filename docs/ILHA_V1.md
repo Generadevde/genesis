@@ -44,6 +44,8 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 ### Física ("corpos têm física")
 - Cada célula tem **no máximo uma coisa**: macieira, maçã, NPC ou corpo.
 - NPCs não ocupam a mesma célula entre si nem a da macieira.
+- O corpo do NPC morto também ocupa a célula: ninguém passa por cima (confirmado).
+- NPC não entra na água (confirmado).
 
 ## Como o código implementa cada regra
 
@@ -83,6 +85,4 @@ Com o mapa de 128 × 128 (50 ilhas × 1 hora simulada, 200 NPCs):
 
 ## Em aberto
 
-- Símbolo do corpo: está **💀, provisório**, aguardando a escolha do dono.
-- O corpo bloqueia a célula (segue "corpos têm física") — confirmar.
-- Água não é andável — confirmar.
+- Símbolo do corpo do NPC morto: está **💀, provisório**, aguardando a escolha do dono.
