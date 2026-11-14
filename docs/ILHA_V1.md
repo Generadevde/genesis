@@ -11,6 +11,15 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 - **Câmera nas setas** do teclado (pedido em 14/11/2026, junto com o mapa menor).
   Cada toque move a vista **1 célula** (segurar a seta faz correr). A vista
   começa no centro do mapa e mostra o que couber no terminal.
+- **Zoom** (pedido em 14/11/2026): **`+`** aproxima, **`-`** afasta.
+  Níveis: **0,5x, 1x (normal), 2x, 4x, 6x**.
+  - 2x / 4x / 6x: cada célula da tela mostra um bloco de 2×2 / 4×4 / 6×6 do mapa.
+    Quando o bloco tem várias coisas, aparece a mais importante:
+    **NPC > corpo > maçã > macieira > grama > água**.
+  - 0,5x: cada célula do mapa ocupa 2×2 células da tela (o emoji fica no canto
+    de cima à esquerda; o resto mostra o chão).
+  - Trocar o zoom mantém o mesmo ponto no centro da tela. No zoom afastado,
+    cada toque na seta anda 1 célula da tela (ex.: 4 células do mapa em 4x).
 
 ### Mapa
 - **128 × 128** células, quadrado (por enquanto). Era 512 × 512: a tela do
@@ -51,6 +60,7 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 
 | Regra | Onde | Como |
 |---|---|---|
+| Zoom | `interface/principal.py` (`ESCALAS`, `Tela.zoom`, `Tela._codigo_bloco`) | A escala diz quantas células do mapa cabem em 1 célula da tela. No afastado, cada bloco vira um código pela ordem de prioridade; no 0,5x, cada célula do mapa vira 2 linhas × 2 células. Só muda a tela, nunca o mundo. |
 | Câmera | `interface/principal.py` (`Tela`) | O terminal fica em modo cbreak (tecla chega sem Enter). Cada seta soma ±1 na posição da câmera; a câmera não sai do mapa. Só desenha o pedaço visível. Não mexe em nada do mundo. |
 | Tempo real | `interface/principal.py` | A cada quadro, mede quanto tempo passou no relógio e chama `mundo.avancar(dt)` com esse valor. |
 | Passagem do tempo | `Mundo::avancar` | Simulação por eventos: cada NPC e cada macieira tem um relógio regressivo. O motor anda até o próximo que vence, dispara, e segue. Não há "passo interno" inventado. |

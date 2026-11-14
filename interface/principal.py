@@ -5,7 +5,8 @@ O que este arquivo faz:
     1. Cria o mundo no motor em C++ (módulo `genesis_motor`, via pybind11).
     2. Em tempo real, pede ao motor para andar o tempo que passou no relógio
        de verdade, e desenha no terminal o pedaço da ilha que cabe na tela.
-    3. As SETAS do teclado movem a câmera (a vista) pelo mapa.
+    3. As SETAS do teclado movem a câmera (a vista) pelo mapa;
+       + e - mudam o zoom (0,5x, 1x, 2x, 4x, 6x).
 
 Regra da STACK.md: a interface só MOSTRA e CONTROLA. Nenhuma regra da
 simulação mora aqui (fome, maçãs, passos... tudo isso está no motor, em C++).
@@ -61,7 +62,8 @@ GRAMA_BYTE = int(gm.Terreno.GRAMA)
 
 # Teclas: o terminal manda as setas como sequências de 3 caracteres.
 # Existem dois formatos, conforme o modo do terminal: ESC [ A ou ESC O A.
-# Aceitamos os dois. Cada seta move a câmera 1 célula (a menor unidade).
+# Aceitamos os dois. Cada seta move a câmera 1 célula DA TELA (no zoom
+# normal, isso é 1 célula do mapa; afastado em x4, são 4 células do mapa).
 SETAS = {}
 for _prefixo in (b"\x1b[", b"\x1bO"):
     SETAS[_prefixo + b"A"] = (0, -1)  # cima
@@ -69,47 +71,83 @@ for _prefixo in (b"\x1b[", b"\x1bO"):
     SETAS[_prefixo + b"C"] = (1, 0)   # direita
     SETAS[_prefixo + b"D"] = (-1, 0)  # esquerda
 
+# ---------------------------------------------------------------------------
+# Zoom (escolhido pelo dono do projeto): + aproxima, - afasta.
+# O número é quantas células do mapa cabem em 1 célula da tela, em cada eixo:
+#   0.5 -> aproximado: cada célula do mapa ocupa 2 x 2 células da tela
+#   1   -> normal
+#   2, 4, 6 -> afastado: cada célula da tela mostra um bloco 2x2, 4x4, 6x6
+# ---------------------------------------------------------------------------
+ESCALAS = [0.5, 1, 2, 4, 6]
+ESCALA_INICIAL = ESCALAS.index(1)
 
-def desenhar_linha(terreno: bytes, ocupacao: bytes) -> Text:
-    """Desenha um pedaço de linha do mapa.
+# No zoom afastado, um bloco pode ter várias coisas. Aparece a mais
+# importante, nesta ordem (escolha do dono do projeto):
+# NPC > corpo > maçã > macieira > grama > água.
+PRIORIDADE = {
+    int(gm.Ocupante.NPC): 4,
+    int(gm.Ocupante.CORPO): 3,
+    int(gm.Ocupante.MACA): 2,
+    int(gm.Ocupante.MACIEIRA): 1,
+}
 
-    Células de chão iguais e seguidas viram um pedaço só (menos trabalho
-    para o rich). Onde há algo em cima do chão, entra o emoji.
+# Cada célula da tela vira um "código" antes de virar texto:
+#   1..4 = o ocupante (mesmos números do motor); GRAMA_COD / AGUA_COD = chão.
+GRAMA_COD = 100
+AGUA_COD = 101
+
+
+def texto_da_linha(codigos: list[int]) -> Text:
+    """Transforma uma linha de códigos em texto colorido.
+
+    Chão igual e seguido vira um pedaço só (menos trabalho para o rich).
     """
     texto = Text(no_wrap=True, overflow="crop")
-    i, n = 0, len(terreno)
+    i, n = 0, len(codigos)
     while i < n:
-        if ocupacao[i]:
-            texto.append(SIMBOLO_OCUPANTE[ocupacao[i]])
+        c = codigos[i]
+        if c < GRAMA_COD:
+            texto.append(SIMBOLO_OCUPANTE[c])
             i += 1
             continue
         j = i
-        while j < n and not ocupacao[j] and terreno[j] == terreno[i]:
+        while j < n and codigos[j] == c:
             j += 1
-        simbolo, cor = GRAMA if terreno[i] == GRAMA_BYTE else AGUA
+        simbolo, cor = GRAMA if c == GRAMA_COD else AGUA
         texto.append(simbolo * (j - i), style=cor)
         i = j
     return texto
 
 
 class Tela:
-    """Câmera + montagem de cada quadro."""
+    """Câmera, zoom e montagem de cada quadro.
+
+    A câmera guarda a célula DO MAPA que fica no canto de cima à esquerda
+    da tela. O zoom só muda quantas células do mapa cabem na tela.
+    """
 
     def __init__(self, mundo: "gm.Mundo") -> None:
         self.mundo = mundo
         self.largura = mundo.largura
         self.altura = mundo.altura
         self.terreno = mundo.terreno_bytes()  # o chão não muda
-        # Câmera = célula do mapa no canto de cima à esquerda da tela.
+        self.nivel = ESCALA_INICIAL
         # Começa com o centro do mapa no centro da tela (ajustado no 1º quadro).
         self.cam_x = None
         self.cam_y = None
+        self._ultima_vista = (1, 1)
 
-    def tamanho_vista(self, console: Console) -> tuple[int, int]:
-        """Quantas células cabem na tela (1 linha fica para o status)."""
-        colunas = max(1, console.width // COLUNAS_POR_CELULA)
-        linhas = max(1, console.height - 1)
-        return min(colunas, self.largura), min(linhas, self.altura)
+    @property
+    def escala(self) -> float:
+        return ESCALAS[self.nivel]
+
+    def vista(self, console: Console) -> tuple[int, int]:
+        """Quantas células DO MAPA cabem na tela (1 linha fica para o status)."""
+        colunas_tela = max(1, console.width // COLUNAS_POR_CELULA)
+        linhas_tela = max(1, console.height - 1)
+        mapa_l = max(1, min(int(colunas_tela * self.escala), self.largura))
+        mapa_a = max(1, min(int(linhas_tela * self.escala), self.altura))
+        return mapa_l, mapa_a
 
     def limitar(self, vis_l: int, vis_a: int) -> None:
         """Não deixa a câmera sair do mapa."""
@@ -117,33 +155,88 @@ class Tela:
         self.cam_y = max(0, min(self.cam_y, self.altura - vis_a))
 
     def mover(self, dx: int, dy: int) -> None:
-        self.cam_x += dx
-        self.cam_y += dy
+        passo = max(1, int(self.escala))  # 1 célula da tela
+        self.cam_x += dx * passo
+        self.cam_y += dy * passo
+
+    def zoom(self, direcao: int, console: Console) -> None:
+        """direcao -1 = aproxima (+), +1 = afasta (-). Mantém o centro."""
+        novo = max(0, min(len(ESCALAS) - 1, self.nivel + direcao))
+        if novo == self.nivel:
+            return
+        vl, va = self._ultima_vista
+        centro_x = self.cam_x + vl / 2
+        centro_y = self.cam_y + va / 2
+        self.nivel = novo
+        vl, va = self.vista(console)
+        self.cam_x = int(centro_x - vl / 2)
+        self.cam_y = int(centro_y - va / 2)
+        self.limitar(vl, va)
 
     def status(self) -> Text:
-        """Linha de cima: tempo, maçãs no chão e situação de cada NPC."""
+        """Linha de cima: tempo, maçãs no chão, NPCs, câmera e zoom."""
         segundos = int(self.mundo.tempo)
         partes = [f"⏱ {segundos // 60:02d}:{segundos % 60:02d}",
                   f"🍎 {len(self.mundo.macas())}"]
         for n in self.mundo.npcs():
             partes.append(f"🗿{n.id + 1} {n.fome:.0f} {NOME_ESTADO[n.estado]}")
-        partes.append(f"câmera ({self.cam_x},{self.cam_y}) setas: mover  q: sair")
+        zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
+        partes.append(f"câmera ({self.cam_x},{self.cam_y}) zoom {zoom}"
+                      "  setas: mover  +/-: zoom  q: sair")
         return Text("  ".join(partes), style="bold", no_wrap=True,
                     overflow="crop")
 
+    def _codigo_celula(self, ocupacao: bytes, x: int, y: int) -> int:
+        i = y * self.largura + x
+        if ocupacao[i]:
+            return ocupacao[i]
+        return GRAMA_COD if self.terreno[i] == GRAMA_BYTE else AGUA_COD
+
+    def _codigo_bloco(self, ocupacao: bytes, x0: int, y0: int, lado: int) -> int:
+        """Código do que aparece num bloco lado x lado (zoom afastado)."""
+        melhor, melhor_p = AGUA_COD, -1
+        for y in range(y0, min(y0 + lado, self.altura)):
+            linha = y * self.largura
+            for x in range(x0, min(x0 + lado, self.largura)):
+                i = linha + x
+                o = ocupacao[i]
+                if o:
+                    p = PRIORIDADE[o]
+                    if p > melhor_p:
+                        melhor, melhor_p = o, p
+                elif melhor_p < 0 and self.terreno[i] == GRAMA_BYTE:
+                    melhor = GRAMA_COD  # grama ganha da água
+        return melhor
+
     def quadro(self, console: Console) -> Group:
-        vis_l, vis_a = self.tamanho_vista(console)
+        vis_l, vis_a = self.vista(console)
         if self.cam_x is None:  # primeiro quadro: centraliza
             self.cam_x = (self.largura - vis_l) // 2
             self.cam_y = (self.altura - vis_a) // 2
         self.limitar(vis_l, vis_a)
+        self._ultima_vista = (vis_l, vis_a)
 
         ocupacao = self.mundo.ocupacao_bytes()
+        cx, cy = self.cam_x, self.cam_y
         linhas = []
-        for y in range(self.cam_y, self.cam_y + vis_a):
-            ini = y * self.largura + self.cam_x
-            fim = ini + vis_l
-            linhas.append(desenhar_linha(self.terreno[ini:fim], ocupacao[ini:fim]))
+        if self.escala == 0.5:
+            # Aproximado: cada célula do mapa vira 2 x 2 células da tela.
+            # O emoji aparece no canto de cima à esquerda; o resto é o chão.
+            for y in range(cy, cy + vis_a):
+                cima, baixo = [], []
+                for x in range(cx, cx + vis_l):
+                    c = self._codigo_celula(ocupacao, x, y)
+                    chao = (GRAMA_COD if self.terreno[y * self.largura + x]
+                            == GRAMA_BYTE else AGUA_COD)
+                    cima += [c, chao]
+                    baixo += [chao, chao]
+                linhas += [texto_da_linha(cima), texto_da_linha(baixo)]
+        else:
+            lado = int(self.escala)
+            for y in range(cy, cy + vis_a, lado):
+                codigos = [self._codigo_bloco(ocupacao, x, y, lado)
+                           for x in range(cx, cx + vis_l, lado)]
+                linhas.append(texto_da_linha(codigos))
         return Group(self.status(), *linhas)
 
 
@@ -188,6 +281,12 @@ def main() -> None:
                 for seq, (dx, dy) in SETAS.items():
                     for _ in range(teclas.count(seq)):
                         tela.mover(dx, dy)
+                # Zoom: "+" aproxima, "-" afasta. Aceita também "=" (mesma
+                # tecla do "+" sem Shift) e o "+"/"-" do teclado numérico.
+                for _ in range(teclas.count(b"+") + teclas.count(b"=")):
+                    tela.zoom(-1, console)
+                for _ in range(teclas.count(b"-")):
+                    tela.zoom(+1, console)
     except KeyboardInterrupt:
         pass
     finally:

@@ -46,7 +46,7 @@ cd genesis
 ./genesis
 ```
 
-Setas do teclado: movem a câmera. Sair: **q** ou **Ctrl+C**.
+Setas do teclado: movem a câmera. **+** / **-**: zoom. Sair: **q** ou **Ctrl+C**.
 
 Para atualizar depois:
 
