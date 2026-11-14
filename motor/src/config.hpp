@@ -96,6 +96,8 @@ inline constexpr double BEBER_DURACAO_S = 10.0;
 // --- Maçãs e macieiras ----------------------------------------------------
 // Cada maçã recupera 12 de fome.
 inline constexpr double MACA_RECUPERA = 12.0;
+// ...e também 5 de sede (pedido em 14/11/2026).
+inline constexpr double MACA_RECUPERA_SEDE = 5.0;
 // Cada macieira derruba 1 maçã a cada 30 a 60 s (sorteado de novo a cada queda).
 inline constexpr double QUEDA_MIN_S = 30.0;
 inline constexpr double QUEDA_MAX_S = 60.0;

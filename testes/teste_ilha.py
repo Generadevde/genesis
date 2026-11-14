@@ -132,7 +132,7 @@ def teste_morte_sem_nada():
         w.avancar(124.999)
         candidatos = [n.id for n in w.npcs()
                       if abs(n.sede - 4) < 1e-9
-                      and n.estado not in (E.MORTO, E.BEBENDO)]
+                      and n.estado not in (E.MORTO, E.BEBENDO, E.COMENDO)]
         w.avancar(0.002)
         for n in w.npcs():
             if n.id in candidatos:
@@ -168,6 +168,7 @@ def teste_acoes(sementes=300, dt=0.1, duracao=1200):
                 est0, f0, s0 = antes[n.id]
                 if n.estado == E.COMENDO:
                     assert n.fome == f0 or est0 != E.COMENDO  # não abaixa
+                    assert n.sede == s0 or est0 != E.COMENDO  # sede também não
                 if n.estado == E.BEBENDO:
                     assert n.sede == s0 or est0 != E.BEBENDO  # não abaixa
                 if n.estado in (E.COMENDO, E.BEBENDO) and est0 != n.estado:
@@ -179,6 +180,8 @@ def teste_acoes(sementes=300, dt=0.1, duracao=1200):
                     assert 9.8 <= dur <= 10.2, dur
                     if acao == E.COMENDO:
                         assert n.fome == min(100, f + 12), (f, n.fome)
+                        # maçã também dá +5 de sede (e a sede não cai comendo)
+                        assert n.sede == min(100, sd + 5), (sd, n.sede)
                         visto["comer"] = (dur, f, n.fome)
                     else:
                         assert n.sede == min(100, sd + 15), (sd, n.sede)
@@ -227,8 +230,9 @@ def teste_geral(sementes=50, duracao=3600):
                 if n.fome > f0:  # +12 (ou +9 se a fome caiu no mesmo segundo)
                     assert n.fome - f0 in (12, 9) or n.fome == 100, n.fome - f0
                     ids_comeram.add(n.id)
-                if n.sede > s0:  # +15 (ou +11 se a sede caiu no mesmo segundo)
-                    assert n.sede - s0 in (15, 11) or n.sede == 100, n.sede - s0
+                if n.sede > s0:  # gole +15 (ou +11 se caiu no mesmo segundo);
+                    #               maçã +5 (ou +1)
+                    assert n.sede - s0 in (15, 11, 5, 1) or n.sede == 100, n.sede - s0
                     ids_beberam.add(n.id)
                 antes[n.id] = (n.fome, n.sede)
             if seg + 1 < 30:

@@ -81,8 +81,9 @@ NOME_ESTADO = {
 ESCALAS = [0.5, 1, 2, 4, 6]
 
 # Botões de velocidade ao lado do tempo (pedido do dono do projeto):
-# ">" = 2x, ">>" = 4x, ">>>>" = 8x. Clicar no botão já ligado volta a 1x.
-VELOCIDADES = [(">", 2), (">>", 4), (">>>>", 8)]
+# ">" = 2x, ">>" = 4x, ">>>>" = 8x, ">>>>>>>>" = 16x (pedido depois).
+# Clicar no botão já ligado volta a 1x.
+VELOCIDADES = [(">", 2), (">>", 4), (">>>>", 8), (">>>>>>>>", 16)]
 
 # Cada célula da tela vira um "código" antes de virar desenho:
 #   1..4       = ocupante (NPC, corpo, maçã, macieira — números do motor)
@@ -574,7 +575,8 @@ class Genesis:
                 "Clique (sem arrastar) — selecionar",
                 "I — trocar de aba (Mapa, NPCs, Info)",
                 "Esc — fechar o menu",
-                ">  >>  >>>>  (barra de baixo) — tempo 2x, 4x, 8x; clicar de novo volta a 1x",
+                ">  >>  >>>>  >>>>>>>>  (barra de baixo) — tempo 2x, 4x, 8x, 16x; "
+                "clicar de novo volta a 1x",
             ]),
         ]
         x = campo.left + 3 * A.ESPACO

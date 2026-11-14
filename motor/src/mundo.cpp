@@ -252,7 +252,9 @@ void Mundo::evento_fome(Npc& n) {
 // A cada 5 s: sede abaixa 4. Chegou a 0 -> morre.
 // Enquanto está bebendo, a sede NÃO abaixa.
 void Mundo::evento_sede(Npc& n) {
-    if (n.estado == EstadoNpc::Bebendo) return;
+    // Bebendo, a sede não abaixa; comendo maçã também não (a maçã mata a
+    // sede um pouco — pedido do dono do projeto).
+    if (n.estado == EstadoNpc::Bebendo || n.estado == EstadoNpc::Comendo) return;
     n.sede -= cfg::SEDE_QUEDA;
     if (n.sede <= cfg::SEDE_MINIMA) {
         n.sede = cfg::SEDE_MINIMA;
@@ -480,7 +482,8 @@ void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
     if (achou) mover(n, melhor);
 }
 
-// Terminou os 10 s comendo: a maçã some e a fome sobe 12 (até 100).
+// Terminou os 10 s comendo: a maçã some, a fome sobe 12 e a sede sobe 5
+// (até 100).
 void Mundo::evento_fim_comer(Npc& n) {
     if (n.comendo_da_mao) {  // comeu a maçã que carregava
         n.comendo_da_mao = false;
@@ -488,6 +491,7 @@ void Mundo::evento_fim_comer(Npc& n) {
         n.origem_carregada = -1;
         n.macieiras_vistas_vazias.clear();
         n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
+        n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::MACA_RECUPERA_SEDE);
         n.estado = EstadoNpc::Vagando;
         n.tem_alvo = false;
         return;
@@ -499,6 +503,7 @@ void Mundo::evento_fim_comer(Npc& n) {
     reservas_.erase(i);
     tirar_maca_do_chao(i);
     n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
+    n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::MACA_RECUPERA_SEDE);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
 }
