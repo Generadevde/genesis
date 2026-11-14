@@ -31,7 +31,8 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 - **Sem limite** de maçãs no chão. **Não estraga** (por enquanto).
 
 ### Maçãs 🍎
-- Cada maçã recupera **12 de fome** (sem passar de 100).
+- Cada maçã recupera **12 de fome** (sem passar de 100) e, desde 14/11/2026,
+  **5 de sede**; enquanto come, nem a fome nem a sede abaixam.
 - Comer **leva 10 s**.
 
 ### NPCs 🗿
