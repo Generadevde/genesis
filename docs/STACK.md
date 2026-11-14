@@ -11,9 +11,14 @@ Definida pelo dono do projeto em 14/11/2026.
 | Persistência | SQLite | Dados persistentes e históricos do mundo |
 | Representação | Unicode | Mapa e entidades desenhados com caracteres Unicode |
 
+## Versões (decididas em 14/11/2026)
+
+- **Python 3.13**
+- **C++20**
+
 ## Plataforma
 
-Só Linux.
+Só Linux. A máquina do dono do projeto usa **Linux Mint Cinnamon**.
 
 ## Interface
 
@@ -30,5 +35,4 @@ separada da simulação: trocar a tela não pode exigir mexer no motor.
 
 ## Em aberto
 
-- Versões do Python e do padrão C++: o dono do projeto não tem exigência;
-  a escolha será feita por ele a partir das opções apresentadas.
+- Versão exata do Mint e como instalar o Python 3.13 nele.
