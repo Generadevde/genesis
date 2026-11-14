@@ -7,3 +7,4 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Stack técnica: [docs/STACK.md](docs/STACK.md)
 - Estrutura e como rodar: [docs/ESTRUTURA.md](docs/ESTRUTURA.md)
 - Primeira simulação (a ilha): [docs/ILHA_V1.md](docs/ILHA_V1.md)
+- Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

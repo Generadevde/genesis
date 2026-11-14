@@ -16,8 +16,10 @@ genesis/
 │   │   └── motor.cpp    ← identificação/versão do motor
 │   └── ponte/
 │       └── ponte.cpp    ← a PONTE pybind11: única peça que liga C++ e Python
-├── interface/
-│   └── principal.py     ← a INTERFACE, em Python + rich. Só mostra.
+├── interface/           ← a INTERFACE própria (pygame, estilo Windows 98)
+│   ├── principal.py     ← a janela: monta a tela, mouse, teclado, motor
+│   ├── win98.py         ← peças de desenho: relevo, menu, abas, tabela
+│   └── aparencia.py     ← todas as cores e tamanhos
 ├── testes/
 │   └── teste_ilha.py    ← confere as regras da ilha sem tela
 └── docs/                ← documentação de tudo
@@ -31,22 +33,22 @@ e `build/` (o motor compilado, `genesis_motor*.so`).
 1. O `instalar.sh` compila `motor/src/*.cpp` numa biblioteca, e a `ponte.cpp`
    transforma essa biblioteca no módulo Python `genesis_motor`.
 2. O `genesis` roda `interface/principal.py` com o Python do `.venv/`.
-3. O `principal.py` cria o `Mundo`, chama `avancar(dt)` com o tempo real que
-   passou, lê o mapa pela ponte e o rich desenha no terminal.
+3. O `principal.py` abre a janela (pygame), cria o `Mundo`, chama
+   `avancar(dt)` com o tempo real que passou, lê o mapa pela ponte e desenha.
 
 ## Como rodar no Linux Mint
 
 Primeira vez:
 
 ```bash
-sudo apt install build-essential cmake python3-dev python3-venv git
+sudo apt install build-essential cmake python3-dev python3-venv git fonts-noto-color-emoji
 git clone https://github.com/Generadevde/genesis.git
 cd genesis
 ./instalar.sh
 ./genesis
 ```
 
-Setas do teclado: movem a câmera. **+** / **-**: zoom. **I**: tabela dos NPCs. Sair: **q** ou **Ctrl+C**.
+Controles: ver [INTERFACE.md](INTERFACE.md). Sair: menu **Arquivo → Sair** (ou fechar a janela).
 
 Para atualizar depois:
 
@@ -57,7 +59,8 @@ git pull
 
 O `./genesis` confere sozinho se o código do motor (C++) mudou desde a
 última compilação e, se mudou, recompila antes de abrir. O `./instalar.sh`
-só precisa ser rodado de novo se o ambiente Python for apagado.
+precisa ser rodado de novo quando mudar uma biblioteca do Python (como na
+troca do rich pelo pygame) ou se o ambiente Python for apagado.
 
 Rodar os testes:
 

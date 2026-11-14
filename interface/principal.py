@@ -1,317 +1,466 @@
 """
-principal.py — interface do Genesis (Python + rich).
+principal.py — interface própria do Genesis (pygame, estilo Windows 98).
 
 O que este arquivo faz:
-    1. Cria o mundo no motor em C++ (módulo `genesis_motor`, via pybind11).
-    2. Em tempo real, pede ao motor para andar o tempo que passou no relógio
-       de verdade, e desenha no terminal o pedaço da ilha que cabe na tela.
-    3. As SETAS do teclado movem a câmera (a vista) pelo mapa;
-       + e - mudam o zoom (0,5x, 1x, 2x, 4x, 6x).
-    4. A tecla I abre/fecha a tela da tabela dos NPCs.
+    1. Abre uma janela maximizada no estilo Windows 98: barra de menus,
+       abas (Mapa / NPCs), painel da direita (seleção) e barra de status.
+    2. Cria o mundo no motor em C++ (módulo `genesis_motor`, via pybind11)
+       e, em tempo real, pede ao motor para andar o tempo que passou.
+    3. Mouse: clicar no mapa (ou numa linha da tabela) seleciona; o painel
+       da direita mostra o símbolo grande e o que é.
+       Teclado: setas movem a câmera; + e - mudam o zoom; I troca de aba.
 
 Regra da STACK.md: a interface só MOSTRA e CONTROLA. Nenhuma regra da
-simulação mora aqui (fome, maçãs, passos... tudo isso está no motor, em C++).
-A câmera é só da tela: mexer nela não muda nada no mundo.
+simulação mora aqui; tudo isso está no motor, em C++.
 
-Sem menus (pedido do dono do projeto): abre direto na simulação.
-Sair: Ctrl+C ou a tecla q.
+Os desenhos de Windows 98 (relevo, menu, abas, tabela) estão em win98.py;
+todas as cores e tamanhos estão em aparencia.py.
 """
 
 import os
-import select
 import sys
-import termios
-import time
-import tty
 from pathlib import Path
 
-from rich.console import Console, Group
-from rich.live import Live
-from rich.table import Table
-from rich.text import Text
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")  # sem propaganda no terminal
+import pygame  # noqa: E402
+
+import aparencia as A  # noqa: E402
+import win98  # noqa: E402
 
 # O módulo compilado fica na pasta build/ na raiz do projeto.
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "build"))
 
-import genesis_motor as gm  # noqa: E402  (precisa vir depois do ajuste do caminho)
+import genesis_motor as gm  # noqa: E402
+
+OC = gm.Ocupante
+EST = gm.EstadoNpc
 
 # ---------------------------------------------------------------------------
-# Símbolos (escolhidos pelo dono do projeto, docs/ILHA_V1.md).
-# Os emojis ocupam 2 colunas no terminal; por isso TODA célula tem 2 colunas,
-# e a grama e a água aparecem dobradas ("" e ~~) para o mapa não entortar.
+# O que cada coisa é: símbolo (escolhido pelo dono do projeto) e nome.
 # ---------------------------------------------------------------------------
-COLUNAS_POR_CELULA = 2
-GRAMA = ('""', "green")
-AGUA = ("~~", "blue")
-SIMBOLO_OCUPANTE = {
-    int(gm.Ocupante.MACIEIRA): "🌳",
-    int(gm.Ocupante.MACA): "🍎",
-    int(gm.Ocupante.NPC): "🗿",
-    # Corpo do NPC morto: cruz latina (U+271D), escolha do dono do projeto.
-    # Ela tem 1 coluna só; o espaço completa as 2 colunas da célula.
-    int(gm.Ocupante.CORPO): "✝ ",
+SIMBOLO = {
+    int(OC.MACIEIRA): "🌳",
+    int(OC.MACA): "🍎",
+    int(OC.NPC): "🗿",
+    int(OC.CORPO): "✝",
 }
+GRAMA_SIMB = '"'
+AGUA_SIMB = "~"
 
 NOME_ESTADO = {
-    gm.EstadoNpc.VAGANDO: "vagando",
-    gm.EstadoNpc.INDO_COMER: "indo comer",
-    gm.EstadoNpc.COMENDO: "comendo",
-    gm.EstadoNpc.MORTO: "morto",
-    gm.EstadoNpc.INDO_BEBER: "indo beber",
-    gm.EstadoNpc.BEBENDO: "bebendo",
+    EST.VAGANDO: "vagando",
+    EST.INDO_COMER: "indo comer",
+    EST.COMENDO: "comendo",
+    EST.MORTO: "morto",
+    EST.INDO_BEBER: "indo beber",
+    EST.BEBENDO: "bebendo",
 }
 
-GRAMA_BYTE = int(gm.Terreno.GRAMA)
-
-# Teclas: o terminal manda as setas como sequências de 3 caracteres.
-# Existem dois formatos, conforme o modo do terminal: ESC [ A ou ESC O A.
-# Aceitamos os dois. Cada seta move a câmera 1 célula DA TELA (no zoom
-# normal, isso é 1 célula do mapa; afastado em x4, são 4 células do mapa).
-SETAS = {}
-for _prefixo in (b"\x1b[", b"\x1bO"):
-    SETAS[_prefixo + b"A"] = (0, -1)  # cima
-    SETAS[_prefixo + b"B"] = (0, 1)   # baixo
-    SETAS[_prefixo + b"C"] = (1, 0)   # direita
-    SETAS[_prefixo + b"D"] = (-1, 0)  # esquerda
-
-# ---------------------------------------------------------------------------
 # Zoom (escolhido pelo dono do projeto): + aproxima, - afasta.
-# O número é quantas células do mapa cabem em 1 célula da tela, em cada eixo:
-#   0.5 -> aproximado: cada célula do mapa ocupa 2 x 2 células da tela
+# Quantas células do mapa cabem em 1 célula da tela, em cada eixo:
+#   0.5 -> aproximado: cada célula do mapa fica do tamanho de 2 x 2
 #   1   -> normal
 #   2, 4, 6 -> afastado: cada célula da tela mostra um bloco 2x2, 4x4, 6x6
-# ---------------------------------------------------------------------------
 ESCALAS = [0.5, 1, 2, 4, 6]
-ESCALA_INICIAL = ESCALAS.index(1)
 
-# No zoom afastado, um bloco pode ter várias coisas. Aparece a mais
-# importante, nesta ordem (escolha do dono do projeto):
-# NPC > corpo > maçã > macieira > grama > água.
-PRIORIDADE = {
-    int(gm.Ocupante.NPC): 4,
-    int(gm.Ocupante.CORPO): 3,
-    int(gm.Ocupante.MACA): 2,
-    int(gm.Ocupante.MACIEIRA): 1,
-}
-
-# Cada célula da tela vira um "código" antes de virar texto:
-#   1..4 = o ocupante (mesmos números do motor); GRAMA_COD / AGUA_COD = chão.
-GRAMA_COD = 100
-AGUA_COD = 101
+# No zoom afastado aparece a coisa mais importante do bloco, nesta ordem
+# (escolha do dono do projeto): NPC > corpo > maçã > macieira > grama > água.
+PRIORIDADE = {int(OC.NPC): 4, int(OC.CORPO): 3, int(OC.MACA): 2,
+              int(OC.MACIEIRA): 1}
+GRAMA = int(gm.Terreno.GRAMA)
+# Códigos de chão (acima dos números dos ocupantes, que vão de 1 a 4).
+COD_GRAMA, COD_AGUA = 100, 101
 
 
-def texto_da_linha(codigos: list[int]) -> Text:
-    """Transforma uma linha de códigos em texto colorido.
+class Simbolos:
+    """Desenha símbolos em qualquer tamanho, guardando o que já desenhou.
 
-    Chão igual e seguido vira um pedaço só (menos trabalho para o rich).
-    """
-    texto = Text(no_wrap=True, overflow="crop")
-    i, n = 0, len(codigos)
-    while i < n:
-        c = codigos[i]
-        if c < GRAMA_COD:
-            texto.append(SIMBOLO_OCUPANTE[c])
-            i += 1
-            continue
-        j = i
-        while j < n and codigos[j] == c:
-            j += 1
-        simbolo, cor = GRAMA if c == GRAMA_COD else AGUA
-        texto.append(simbolo * (j - i), style=cor)
-        i = j
-    return texto
-
-
-class Tela:
-    """Câmera, zoom e montagem de cada quadro.
-
-    A câmera guarda a célula DO MAPA que fica no canto de cima à esquerda
-    da tela. O zoom só muda quantas células do mapa cabem na tela.
+    Emojis coloridos vêm da fonte Noto Color Emoji, que só existe no tamanho
+    nativo; por isso são desenhados nele e depois redimensionados.
+    Os outros símbolos (", ~, ✝) vêm da fonte do mapa, na cor pedida.
     """
 
-    def __init__(self, mundo: "gm.Mundo") -> None:
-        self.mundo = mundo
-        self.largura = mundo.largura
-        self.altura = mundo.altura
-        self.terreno = mundo.terreno_bytes()  # o chão não muda
-        self.nivel = ESCALA_INICIAL
-        # Começa com o centro do mapa no centro da tela (ajustado no 1º quadro).
-        self.cam_x = None
-        self.cam_y = None
-        self._ultima_vista = (1, 1)
+    def __init__(self) -> None:
+        self._cache = {}
+        self._emoji = None
+        if os.path.exists(A.FONTE_EMOJI):
+            self._emoji = pygame.font.Font(A.FONTE_EMOJI,
+                                           A.FONTE_EMOJI_TAMANHO_NATIVO)
+        else:
+            print("Aviso: fonte de emoji não encontrada. Instale com:\n"
+                  "  sudo apt install fonts-noto-color-emoji")
+        self._fontes_mapa = {}
+
+    def _fonte_mapa(self, tamanho: int) -> pygame.font.Font:
+        if tamanho not in self._fontes_mapa:
+            self._fontes_mapa[tamanho] = pygame.font.Font(A.FONTE_MAPA, tamanho)
+        return self._fontes_mapa[tamanho]
+
+    def get(self, simbolo: str, lado: int, cor=A.PRETO) -> pygame.Surface:
+        chave = (simbolo, lado, cor)
+        if chave not in self._cache:
+            emoji = ord(simbolo[0]) > 0x1F000
+            if emoji and self._emoji:
+                img = self._emoji.render(simbolo, True, A.PRETO)
+            else:
+                img = self._fonte_mapa(lado).render(simbolo, True, cor)
+            # Encaixa no quadrado lado x lado sem deformar.
+            esc = min(lado / img.get_width(), lado / img.get_height())
+            tam = (max(1, round(img.get_width() * esc)),
+                   max(1, round(img.get_height() * esc)))
+            self._cache[chave] = pygame.transform.smoothscale(img, tam)
+        return self._cache[chave]
+
+
+class Genesis:
+    """A janela inteira: estado da tela + desenho + mouse e teclado."""
+
+    def __init__(self) -> None:
+        pygame.display.init()
+        pygame.font.init()
+        info = pygame.display.Info()
+        self.tela = pygame.display.set_mode((info.current_w, info.current_h),
+                                            pygame.RESIZABLE)
+        pygame.display.set_caption("Genesis")
+        self._maximizar()
+        pygame.key.set_repeat(A.REPETIR_TECLA_ESPERA_MS,
+                              A.REPETIR_TECLA_INTERVALO_MS)
+
+        self.fonte = pygame.font.Font(A.FONTE_UI, A.TAM_FONTE_UI)
+        self.fonte_negrito = pygame.font.Font(A.FONTE_UI_NEGRITO, A.TAM_FONTE_UI)
+        self.simbolos = Simbolos()
+
+        # Menu "Arquivo" (pedido do dono do projeto).
+        self.menu = win98.BarraMenu(self.fonte, [
+            ("Arquivo", [
+                ("Nova simulação", self.nova_simulacao),
+                ("Exibir", self.exibir_informacoes),
+                None,
+                ("Sair", self.sair),
+            ]),
+        ])
+        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs"])
+
+        self.rodando = True
+        self.nivel_zoom = ESCALAS.index(1)
+        self.nova_simulacao()
+
+    # ------------------------------------------------------------------
+    # Janela
+    # ------------------------------------------------------------------
+    def _maximizar(self) -> None:
+        """Pede ao sistema para maximizar a janela (pedido do dono)."""
+        try:
+            from pygame._sdl2.video import Window
+            Window.from_display_module().maximize()
+        except Exception:
+            pass  # sem maximizar: a janela já abre do tamanho da tela
+
+    # ------------------------------------------------------------------
+    # Ações do menu
+    # ------------------------------------------------------------------
+    def nova_simulacao(self) -> None:
+        """Começa um mundo novo, com semente sorteada."""
+        semente = int.from_bytes(os.urandom(8), "little")
+        self.mundo = gm.Mundo(semente)
+        self.terreno = self.mundo.terreno_bytes()  # o chão não muda
+        self.L, self.H = self.mundo.largura, self.mundo.altura
+        self.cam_x = self.cam_y = None  # centraliza no próximo quadro
+        self.selecao = None  # ("npc", id) ou ("celula", x, y)
+
+    def exibir_informacoes(self) -> None:
+        """'Exibir': mostra a tela com as informações (aba NPCs)."""
+        self.abas.ativa = self.abas.nomes.index("NPCs")
+
+    def sair(self) -> None:
+        self.rodando = False
+
+    # ------------------------------------------------------------------
+    # Medidas da tela (recalculadas a cada quadro: a janela pode mudar)
+    # ------------------------------------------------------------------
+    def layout(self):
+        L, H = self.tela.get_size()
+        alt_status = self.fonte.get_height() + 2 * A.ESPACO
+        topo = self.menu.altura
+        abas_y = topo + A.ESPACO
+        conteudo = pygame.Rect(A.ESPACO, abas_y + self.abas.altura,
+                               L - A.LARGURA_PAINEL - 3 * A.ESPACO,
+                               H - (abas_y + self.abas.altura) - alt_status - A.ESPACO)
+        painel = pygame.Rect(conteudo.right + A.ESPACO, abas_y,
+                             A.LARGURA_PAINEL, conteudo.bottom - abas_y)
+        status = pygame.Rect(0, H - alt_status, L, alt_status)
+        return conteudo, painel, status, abas_y
 
     @property
     def escala(self) -> float:
-        return ESCALAS[self.nivel]
+        return ESCALAS[self.nivel_zoom]
 
-    def vista(self, console: Console) -> tuple[int, int]:
-        """Quantas células DO MAPA cabem na tela (o mapa usa a tela toda)."""
-        colunas_tela = max(1, console.width // COLUNAS_POR_CELULA)
-        linhas_tela = max(1, console.height)
-        mapa_l = max(1, min(int(colunas_tela * self.escala), self.largura))
-        mapa_a = max(1, min(int(linhas_tela * self.escala), self.altura))
-        return mapa_l, mapa_a
+    def medidas_mapa(self, area: pygame.Rect):
+        """Pixels por célula da tela, células do mapa por célula da tela,
+        e quantas células do mapa cabem (largura, altura)."""
+        cel = A.TAM_CELULA * (2 if self.escala < 1 else 1)
+        lado = max(1, int(self.escala))
+        vis_l = min((area.width - 4) // cel * lado, self.L)
+        vis_a = min((area.height - 4) // cel * lado, self.H)
+        return cel, lado, max(1, vis_l), max(1, vis_a)
 
-    def limitar(self, vis_l: int, vis_a: int) -> None:
-        """Não deixa a câmera sair do mapa."""
-        self.cam_x = max(0, min(self.cam_x, self.largura - vis_l))
-        self.cam_y = max(0, min(self.cam_y, self.altura - vis_a))
+    def limitar_camera(self, vis_l: int, vis_a: int) -> None:
+        self.cam_x = max(0, min(self.cam_x, self.L - vis_l))
+        self.cam_y = max(0, min(self.cam_y, self.H - vis_a))
 
-    def mover(self, dx: int, dy: int) -> None:
-        passo = max(1, int(self.escala))  # 1 célula da tela
-        self.cam_x += dx * passo
-        self.cam_y += dy * passo
-
-    def zoom(self, direcao: int, console: Console) -> None:
-        """direcao -1 = aproxima (+), +1 = afasta (-). Mantém o centro."""
-        novo = max(0, min(len(ESCALAS) - 1, self.nivel + direcao))
-        if novo == self.nivel:
-            return
-        vl, va = self._ultima_vista
-        centro_x = self.cam_x + vl / 2
-        centro_y = self.cam_y + va / 2
-        self.nivel = novo
-        vl, va = self.vista(console)
-        self.cam_x = int(centro_x - vl / 2)
-        self.cam_y = int(centro_y - va / 2)
-        self.limitar(vl, va)
-
-    def status(self) -> Text:
-        """Resumo (mostrado na tela da tabela): tempo, maçãs, câmera, zoom."""
-        segundos = int(self.mundo.tempo)
-        partes = [f"⏱ {segundos // 60:02d}:{segundos % 60:02d}",
-                  f"🍎 {len(self.mundo.macas())}"]
-        zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
-        partes.append(f"câmera ({self.cam_x},{self.cam_y}) zoom {zoom}"
-                      "  setas: mover  +/-: zoom  I: tabela  q: sair")
-        return Text("  ".join(partes), style="bold")
-
-    def tabela(self) -> Group:
-        """Tela separada (tecla I): uma linha por NPC."""
-        t = Table(title="NPCs  (I: voltar ao mapa)", header_style="bold")
-        t.add_column("NPC")
-        t.add_column("Fome", justify="right")
-        t.add_column("Sede", justify="right")
-        t.add_column("Estado")
-        t.add_column("Posição", justify="right")
-        for n in self.mundo.npcs():
-            t.add_row(f"🗿{n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
-                      NOME_ESTADO[n.estado], f"({n.pos.x}, {n.pos.y})")
-        return Group(self.status(), t)
-
-    def _codigo_celula(self, ocupacao: bytes, x: int, y: int) -> int:
-        i = y * self.largura + x
-        if ocupacao[i]:
-            return ocupacao[i]
-        return GRAMA_COD if self.terreno[i] == GRAMA_BYTE else AGUA_COD
-
-    def _codigo_bloco(self, ocupacao: bytes, x0: int, y0: int, lado: int) -> int:
-        """Código do que aparece num bloco lado x lado (zoom afastado)."""
-        melhor, melhor_p = AGUA_COD, -1
-        for y in range(y0, min(y0 + lado, self.altura)):
-            linha = y * self.largura
-            for x in range(x0, min(x0 + lado, self.largura)):
-                i = linha + x
-                o = ocupacao[i]
+    # ------------------------------------------------------------------
+    # O que tem numa célula / num bloco
+    # ------------------------------------------------------------------
+    def codigo_bloco(self, oc: bytes, x0: int, y0: int, lado: int):
+        """Código e posição do que aparece num bloco lado x lado."""
+        melhor, pos, prio = COD_AGUA, (x0, y0), -1
+        for y in range(y0, min(y0 + lado, self.H)):
+            base = y * self.L
+            for x in range(x0, min(x0 + lado, self.L)):
+                o = oc[base + x]
                 if o:
-                    p = PRIORIDADE[o]
-                    if p > melhor_p:
-                        melhor, melhor_p = o, p
-                elif melhor_p < 0 and self.terreno[i] == GRAMA_BYTE:
-                    melhor = GRAMA_COD  # grama ganha da água
-        return melhor
+                    if PRIORIDADE[o] > prio:
+                        melhor, pos, prio = o, (x, y), PRIORIDADE[o]
+                elif prio < 0 and self.terreno[base + x] == GRAMA:
+                    melhor, pos = COD_GRAMA, (x, y)
+        return melhor, pos
 
-    def quadro(self, console: Console) -> Group:
-        vis_l, vis_a = self.vista(console)
-        if self.cam_x is None:  # primeiro quadro: centraliza
-            self.cam_x = (self.largura - vis_l) // 2
-            self.cam_y = (self.altura - vis_a) // 2
-        self.limitar(vis_l, vis_a)
-        self._ultima_vista = (vis_l, vis_a)
+    def npc_em(self, x: int, y: int):
+        for n in self.mundo.npcs():
+            if n.pos.x == x and n.pos.y == y:
+                return n
+        return None
 
-        ocupacao = self.mundo.ocupacao_bytes()
-        cx, cy = self.cam_x, self.cam_y
-        linhas = []
-        if self.escala == 0.5:
-            # Aproximado: cada célula do mapa vira 2 x 2 células da tela.
-            # O emoji aparece no canto de cima à esquerda; o resto é o chão.
-            for y in range(cy, cy + vis_a):
-                cima, baixo = [], []
-                for x in range(cx, cx + vis_l):
-                    c = self._codigo_celula(ocupacao, x, y)
-                    chao = (GRAMA_COD if self.terreno[y * self.largura + x]
-                            == GRAMA_BYTE else AGUA_COD)
-                    cima += [c, chao]
-                    baixo += [chao, chao]
-                linhas += [texto_da_linha(cima), texto_da_linha(baixo)]
+    # ------------------------------------------------------------------
+    # Desenho
+    # ------------------------------------------------------------------
+    def desenhar_mapa(self, area: pygame.Rect) -> None:
+        win98.caixa(self.tela, area, saliente=False, cor=A.FUNDO_MAPA)
+        cel, lado, vis_l, vis_a = self.medidas_mapa(area)
+        if self.cam_x is None:  # primeiro quadro: centro do mapa no centro
+            self.cam_x = (self.L - vis_l) // 2
+            self.cam_y = (self.H - vis_a) // 2
+        self.limitar_camera(vis_l, vis_a)
+        self._mapa_area, self._mapa_cel, self._mapa_lado = area, cel, lado
+
+        oc = self.mundo.ocupacao_bytes()
+        grama = self.simbolos.get(GRAMA_SIMB, cel, A.COR_GRAMA)
+        agua = self.simbolos.get(AGUA_SIMB, cel, A.COR_AGUA)
+        ox, oy = area.left + 2, area.top + 2
+        anterior = self.tela.get_clip()
+        self.tela.set_clip(area.inflate(-4, -4))
+        for j, my in enumerate(range(self.cam_y, self.cam_y + vis_a, lado)):
+            for i, mx in enumerate(range(self.cam_x, self.cam_x + vis_l, lado)):
+                if lado == 1:  # zoom normal/aproximado: célula direta
+                    k = my * self.L + mx
+                    cod = oc[k] or (COD_GRAMA if self.terreno[k] == GRAMA
+                                    else COD_AGUA)
+                else:
+                    cod, _ = self.codigo_bloco(oc, mx, my, lado)
+                if cod == COD_GRAMA:
+                    img = grama
+                elif cod == COD_AGUA:
+                    img = agua
+                else:
+                    cor = A.COR_CRUZ if cod == int(OC.CORPO) else A.PRETO
+                    img = self.simbolos.get(SIMBOLO[cod], cel, cor)
+                px = ox + i * cel + (cel - img.get_width()) // 2
+                py = oy + j * cel + (cel - img.get_height()) // 2
+                self.tela.blit(img, (px, py))
+        # Seleção: moldura branca fina em volta da célula selecionada
+        # (PROVISÓRIO, aguardando o dono do projeto).
+        alvo = self.posicao_selecao()
+        if alvo:
+            sx = (alvo[0] - self.cam_x) // lado
+            sy = (alvo[1] - self.cam_y) // lado
+            if 0 <= sx * lado < vis_l and 0 <= sy * lado < vis_a:
+                r = pygame.Rect(ox + sx * cel, oy + sy * cel, cel, cel)
+                pygame.draw.rect(self.tela, A.BRANCO, r, 1)
+        self.tela.set_clip(anterior)
+
+    def linhas_tabela(self):
+        return [[f"NPC {n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
+                 NOME_ESTADO[n.estado], f"({n.pos.x}, {n.pos.y})"]
+                for n in self.mundo.npcs()]
+
+    def desenhar_npcs(self, area: pygame.Rect) -> None:
+        pygame.draw.rect(self.tela, A.CINZA, area)
+        sel = self.selecao[1] if self.selecao and self.selecao[0] == "npc" else None
+        self._linhas_rects = win98.tabela(
+            self.tela, area.inflate(-2 * A.ESPACO, -2 * A.ESPACO), self.fonte,
+            ["NPC", "Fome", "Sede", "Estado", "Posição"],
+            self.linhas_tabela(), selecionada=sel)
+
+    def descrever_selecao(self):
+        """Símbolo, cor e linhas de texto do que está selecionado."""
+        if self.selecao is None:
+            return None, None, ["Clique em algo no mapa."]
+        if self.selecao[0] == "npc":
+            n = self.mundo.npcs()[self.selecao[1]]
+            if n.estado == EST.MORTO:
+                causa = "fome" if n.fome == 0 else "sede"
+                return "✝", A.PRETO, [f"Corpo do NPC {n.id + 1}",
+                                      f"Morreu de {causa}",
+                                      f"Posição: ({n.pos.x}, {n.pos.y})"]
+            return "🗿", A.PRETO, [f"NPC {n.id + 1}",
+                                   f"Fome: {n.fome:.0f}",
+                                   f"Sede: {n.sede:.0f}",
+                                   f"Estado: {NOME_ESTADO[n.estado]}",
+                                   f"Posição: ({n.pos.x}, {n.pos.y})"]
+        _, x, y = self.selecao
+        o = self.mundo.ocupante(x, y)
+        pos = f"Posição: ({x}, {y})"
+        if o == OC.MACIEIRA:
+            return "🌳", A.PRETO, ["Macieira", pos]
+        if o == OC.MACA:
+            return "🍎", A.PRETO, ["Maçã", pos]
+        if self.mundo.terreno(x, y) == gm.Terreno.GRAMA:
+            return GRAMA_SIMB, A.COR_GRAMA, ["Grama", pos]
+        return AGUA_SIMB, A.COR_AGUA, ["Água", pos]
+
+    def posicao_selecao(self):
+        if self.selecao is None:
+            return None
+        if self.selecao[0] == "npc":
+            n = self.mundo.npcs()[self.selecao[1]]
+            return n.pos.x, n.pos.y
+        return self.selecao[1], self.selecao[2]
+
+    def desenhar_painel(self, r: pygame.Rect) -> None:
+        win98.caixa(self.tela, r)
+        y = r.top + 2 * A.ESPACO
+        win98.escrever(self.tela, self.fonte_negrito, "Seleção",
+                       (r.left + 2 * A.ESPACO, y))
+        y += self.fonte.get_height() + 2 * A.ESPACO
+        simb, cor, linhas = self.descrever_selecao()
+        quadro = pygame.Rect(r.left + (r.width - A.TAM_SIMBOLO_GRANDE) // 2 - A.ESPACO,
+                             y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
+                             A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
+        fundo = A.FUNDO_MAPA if simb in (GRAMA_SIMB, AGUA_SIMB) else A.FUNDO_CAMPO
+        win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
+        if simb:
+            img = self.simbolos.get(simb, A.TAM_SIMBOLO_GRANDE, cor)
+            self.tela.blit(img, (quadro.centerx - img.get_width() // 2,
+                                 quadro.centery - img.get_height() // 2))
+        y = quadro.bottom + 2 * A.ESPACO
+        for i, linha in enumerate(linhas):
+            f = self.fonte_negrito if i == 0 else self.fonte
+            win98.escrever(self.tela, f, linha, (r.left + 2 * A.ESPACO, y))
+            y += self.fonte.get_height() + A.ESPACO
+
+    def desenhar_status(self, r: pygame.Rect) -> None:
+        pygame.draw.rect(self.tela, A.CINZA, r)
+        s = int(self.mundo.tempo)
+        zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
+        partes = [f"Tempo {s // 60:02d}:{s % 60:02d}",
+                  f"Maçãs no chão: {len(self.mundo.macas())}",
+                  f"Zoom {zoom}",
+                  f"Câmera ({self.cam_x}, {self.cam_y})",
+                  "Setas: mover   + / -: zoom   I: trocar aba"]
+        x = r.left + 2
+        for p in partes:
+            w = self.fonte.size(p)[0] + 4 * A.ESPACO
+            campo = pygame.Rect(x, r.top + 2, w, r.height - 4)
+            win98.relevo(self.tela, campo, saliente=False)
+            win98.escrever(self.tela, self.fonte, p,
+                           (campo.left + 2 * A.ESPACO, campo.top + A.ESPACO - 2))
+            x += w + 2
+
+    def desenhar(self) -> None:
+        self.tela.fill(A.CINZA)
+        conteudo, painel, status, abas_y = self.layout()
+        self.menu.desenhar(self.tela, self.tela.get_width())
+        # Área de conteúdo com relevo; abas por cima, coladas nela.
+        win98.caixa(self.tela, conteudo.inflate(4, 4))
+        if self.abas.nomes[self.abas.ativa] == "Mapa":
+            self.desenhar_mapa(conteudo)
         else:
-            lado = int(self.escala)
-            for y in range(cy, cy + vis_a, lado):
-                codigos = [self._codigo_bloco(ocupacao, x, y, lado)
-                           for x in range(cx, cx + vis_l, lado)]
-                linhas.append(texto_da_linha(codigos))
-        # Sem linha de status: o mapa ocupa a tela toda (pedido do dono).
-        return Group(*linhas)
+            self.desenhar_npcs(conteudo)
+        self.abas.desenhar(self.tela, conteudo.left, abas_y)
+        self.desenhar_painel(painel)
+        self.desenhar_status(status)
+        self.menu.desenhar_aberto(self.tela)  # por último: fica por cima
+        pygame.display.flip()
 
+    # ------------------------------------------------------------------
+    # Mouse e teclado
+    # ------------------------------------------------------------------
+    def zoom(self, direcao: int) -> None:
+        """direcao -1 = aproxima (+), +1 = afasta (-). Mantém o centro."""
+        novo = max(0, min(len(ESCALAS) - 1, self.nivel_zoom + direcao))
+        if novo == self.nivel_zoom:
+            return
+        conteudo = self.layout()[0]
+        _, _, vl, va = self.medidas_mapa(conteudo)
+        cx, cy = self.cam_x + vl / 2, self.cam_y + va / 2
+        self.nivel_zoom = novo
+        _, _, vl, va = self.medidas_mapa(conteudo)
+        self.cam_x, self.cam_y = int(cx - vl / 2), int(cy - va / 2)
+        self.limitar_camera(vl, va)
 
-def ler_teclas(fd: int, espera: float) -> bytes:
-    """Espera até `espera` segundos por teclas; devolve o que chegou."""
-    pronto, _, _ = select.select([fd], [], [], max(0.0, espera))
-    return os.read(fd, 64) if pronto else b""
+    def clique_mapa(self, pos) -> None:
+        area, cel, lado = self._mapa_area, self._mapa_cel, self._mapa_lado
+        i = (pos[0] - area.left - 2) // cel
+        j = (pos[1] - area.top - 2) // cel
+        mx, my = self.cam_x + i * lado, self.cam_y + j * lado
+        if not (0 <= mx < self.L and 0 <= my < self.H):
+            return
+        cod, (x, y) = self.codigo_bloco(self.mundo.ocupacao_bytes(), mx, my, lado)
+        if cod in (int(OC.NPC), int(OC.CORPO)):
+            n = self.npc_em(x, y)
+            self.selecao = ("npc", n.id) if n else ("celula", x, y)
+        else:
+            self.selecao = ("celula", x, y)
 
+    def tratar_evento(self, ev) -> None:
+        if ev.type == pygame.QUIT:
+            self.sair()
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            if self.menu.clique(ev.pos) or self.abas.clique(ev.pos):
+                return
+            conteudo = self.layout()[0]
+            if not conteudo.collidepoint(ev.pos):
+                return
+            if self.abas.nomes[self.abas.ativa] == "Mapa":
+                self.clique_mapa(ev.pos)
+            else:
+                for i, r in enumerate(getattr(self, "_linhas_rects", [])):
+                    if r.collidepoint(ev.pos):
+                        self.selecao = ("npc", i)
+        elif ev.type == pygame.KEYDOWN:
+            passo = max(1, int(self.escala))  # 1 célula da tela
+            if ev.key == pygame.K_ESCAPE:
+                self.menu.aberto = None
+            elif ev.key == pygame.K_LEFT:
+                self.cam_x -= passo
+            elif ev.key == pygame.K_RIGHT:
+                self.cam_x += passo
+            elif ev.key == pygame.K_UP:
+                self.cam_y -= passo
+            elif ev.key == pygame.K_DOWN:
+                self.cam_y += passo
+            elif ev.unicode in ("+", "=") or ev.key == pygame.K_KP_PLUS:
+                self.zoom(-1)
+            elif ev.unicode == "-" or ev.key == pygame.K_KP_MINUS:
+                self.zoom(+1)
+            elif ev.key == pygame.K_i:
+                self.abas.ativa = (self.abas.ativa + 1) % len(self.abas.nomes)
 
-def main() -> None:
-    # Semente sorteada a cada execução: cada vez que abre, é uma ilha nova.
-    semente = int.from_bytes(os.urandom(8), "little")
-    mundo = gm.Mundo(semente)
-    tela = Tela(mundo)
-    console = Console()
-
-    # A simulação é redesenhada no ritmo do passo do NPC (1 s), que é o que
-    # mais se mexe. O número vem do motor (config.hpp). Apertar uma seta
-    # redesenha na hora, sem esperar.
-    intervalo = gm.NPC_PASSO_S
-
-    fd = sys.stdin.fileno()
-    config_terminal = termios.tcgetattr(fd)
-    try:
-        # cbreak: as teclas chegam na hora, sem precisar de Enter.
-        tty.setcbreak(fd)
-        with Live(console=console, screen=True, auto_refresh=False,
-                  vertical_overflow="crop") as live:
-            ultimo = time.monotonic()
-            proximo_quadro = ultimo
-            na_tabela = False  # tecla I alterna entre mapa e tabela
-            while True:
-                agora = time.monotonic()
-                mundo.avancar(agora - ultimo)  # tempo real
-                ultimo = agora
-                imagem = tela.tabela() if na_tabela else tela.quadro(console)
-                live.update(imagem, refresh=True)
-                if agora >= proximo_quadro:
-                    proximo_quadro = agora + intervalo
-
-                teclas = ler_teclas(fd, proximo_quadro - time.monotonic())
-                if b"q" in teclas:
-                    break
-                for _ in range(teclas.count(b"i") + teclas.count(b"I")):
-                    na_tabela = not na_tabela
-                for seq, (dx, dy) in SETAS.items():
-                    for _ in range(teclas.count(seq)):
-                        tela.mover(dx, dy)
-                # Zoom: "+" aproxima, "-" afasta. Aceita também "=" (mesma
-                # tecla do "+" sem Shift) e o "+"/"-" do teclado numérico.
-                for _ in range(teclas.count(b"+") + teclas.count(b"=")):
-                    tela.zoom(-1, console)
-                for _ in range(teclas.count(b"-")):
-                    tela.zoom(+1, console)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        # Devolve o terminal ao normal, aconteça o que acontecer.
-        termios.tcsetattr(fd, termios.TCSADRAIN, config_terminal)
+    # ------------------------------------------------------------------
+    # Laço principal
+    # ------------------------------------------------------------------
+    def rodar(self) -> None:
+        relogio = pygame.time.Clock()
+        while self.rodando:
+            for ev in pygame.event.get():
+                self.tratar_evento(ev)
+            # Tempo real: o motor anda exatamente o que passou no relógio.
+            dt_ms = relogio.tick(A.QUADROS_POR_SEGUNDO)
+            self.mundo.avancar(dt_ms / 1000.0)
+            self.desenhar()
+        pygame.quit()
 
 
 if __name__ == "__main__":
-    main()
+    Genesis().rodar()

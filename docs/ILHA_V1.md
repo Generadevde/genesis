@@ -5,26 +5,12 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 
 ## Regras definidas pelo dono do projeto
 
-### Executável
-- `./genesis` abre direto na simulação, **sem menus**. Sai com **Ctrl+C** ou **q**.
-- Simulação em **tempo real** (por enquanto).
-- **Câmera nas setas** do teclado (pedido em 14/11/2026, junto com o mapa menor).
-  Cada toque move a vista **1 célula** (segurar a seta faz correr). A vista
-  começa no centro do mapa e mostra o que couber no terminal.
-- **Zoom** (pedido em 14/11/2026): **`+`** aproxima, **`-`** afasta.
-  Níveis: **0,5x, 1x (normal), 2x, 4x, 6x**.
-  - 2x / 4x / 6x: cada célula da tela mostra um bloco de 2×2 / 4×4 / 6×6 do mapa.
-    Quando o bloco tem várias coisas, aparece a mais importante:
-    **NPC > corpo > maçã > macieira > grama > água**.
-  - 0,5x: cada célula do mapa ocupa 2×2 células da tela (o emoji fica no canto
-    de cima à esquerda; o resto mostra o chão).
-  - Trocar o zoom mantém o mesmo ponto no centro da tela. No zoom afastado,
-    cada toque na seta anda 1 célula da tela (ex.: 4 células do mapa em 4x).
-- **Tabela dos NPCs** (pedida em 14/11/2026): tela separada, abre e fecha
-  com a tecla **I**. Colunas: NPC, Fome, Sede, Estado, Posição.
-- **O mapa ocupa a tela toda**, sem linha de status em cima (pedido em
-  14/11/2026). Tempo, maçãs no chão, câmera, zoom e teclas aparecem em cima
-  da tabela.
+### Executável e tela
+- `./genesis` abre direto na simulação, **sem menus de início**, em **tempo real**.
+- A tela é a interface própria estilo Windows 98: ver [INTERFACE.md](INTERFACE.md)
+  (menu Arquivo, abas Mapa/NPCs, painel de seleção, câmera nas setas,
+  zoom 0,5x / 1x / 2x / 4x / 6x com a prioridade NPC > corpo > maçã >
+  macieira > grama > água).
 
 ### Mapa
 - **128 × 128** células, quadrado (por enquanto). Era 512 × 512: a tela do
@@ -82,9 +68,7 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 
 | Regra | Onde | Como |
 |---|---|---|
-| Zoom | `interface/principal.py` (`ESCALAS`, `Tela.zoom`, `Tela._codigo_bloco`) | A escala diz quantas células do mapa cabem em 1 célula da tela. No afastado, cada bloco vira um código pela ordem de prioridade; no 0,5x, cada célula do mapa vira 2 linhas × 2 células. Só muda a tela, nunca o mundo. |
-| Câmera | `interface/principal.py` (`Tela`) | O terminal fica em modo cbreak (tecla chega sem Enter). Cada seta soma ±1 na posição da câmera; a câmera não sai do mapa. Só desenha o pedaço visível. Não mexe em nada do mundo. |
-| Tempo real | `interface/principal.py` | A cada quadro, mede quanto tempo passou no relógio e chama `mundo.avancar(dt)` com esse valor. |
+| Tempo real | `interface/principal.py` | A cada quadro, mede quanto tempo passou no relógio e chama `mundo.avancar(dt)` com esse valor. (O resto da tela está em INTERFACE.md.) |
 | Passagem do tempo | `Mundo::avancar` | Simulação por eventos: cada NPC e cada macieira tem um relógio regressivo. O motor anda até o próximo que vence, dispara, e segue. Não há "passo interno" inventado. |
 | Fome −3 a cada 5 s | `Mundo::evento_fome` | Relógio de 5 s por NPC. Chegou a 0 → `morrer`. |
 | Morte | `Mundo::morrer` | Estado vira Morto; a célula passa a ter um Corpo (continua ocupada). Se estava comendo, a maçã fica livre para outro. |
@@ -93,7 +77,6 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 | Fome e sede juntas | `Mundo::evento_passo` | Se as duas estão baixas: tenta a menor (`tentar_beber` / `tentar_comer`); se não achar nada para ela, tenta a outra. |
 | Achar água | `Mundo::procurar_agua` | Na área 32 × 32, a célula de água mais próxima que tenha ao lado uma célula de onde dá para beber. |
 | Beber 10 s | `Mundo::tentar_beber` / `evento_fim_beber` | Ao lado da água, fica Bebendo por 10 s; no fim, sede +15. |
-| Tabela (tecla I) | `interface/principal.py` (`Tela.tabela`) | Tabela do rich com uma linha por NPC. Só mostra; não mexe no mundo. |
 | Passo de 1 s | `Mundo::evento_passo` | Relógio de 1 s por NPC. Anda em 8 direções (diagonais contam como 1 célula). |
 | Andar sem voltar | `Mundo::evento_passo` | Sorteia entre as vizinhas livres, menos a de onde veio. Se a única saída for voltar, volta (para não ficar preso). |
 | Visão 32 × 32 | `Mundo::procurar_maca` | Olha 16 células para um lado e 15 para o outro (32 com a dele), nas duas direções. |
