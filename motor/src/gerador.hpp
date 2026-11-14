@@ -4,13 +4,15 @@
 // Regras do dono do projeto (14/11/2026), números em config.hpp:
 //   - Borda de BORDA_AGUA células = mar: água do nível 0 até o -10
 //     (cheia, nível 10); abaixo, pedra; acima, ar.
-//   - Terra (o meio): a superfície fica entre +1 e +4 (relevo "médio").
-//     Topo = grama (neve se o topo está em +4); abaixo dela, terra até o -3;
-//     dali para baixo, pedra.
+//   - Terra (o meio): 40% planície (+1), 30% morro (até +4), 30% vale
+//     (até -4). Topo = grama (neve se está em +4; pedra exposta se está
+//     abaixo do -3); abaixo do topo, terra até o -3; dali para baixo, pedra.
+//   - Vales ligados ao mar enchem de água até o nível do mar (0).
 //
 // O relevo vem de "ruído suave": valores sorteados numa grade espaçada e
 // interpolados com suavidade entre os pontos (value noise), somando
-// algumas camadas de detalhe. Depois é esticado para caber em +1..+4.
+// algumas camadas de detalhe. Depois a terra é dividida pela altura do
+// ruído em vale / planície / morro nas porcentagens pedidas.
 // ---------------------------------------------------------------------------
 #pragma once
 

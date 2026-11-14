@@ -29,35 +29,79 @@ MAT = gm.Material
 
 
 def teste_mapa():
-    """Camadas do gerador (leitura A, decidida pelo dono do projeto)."""
-    w = gm.Mundo(1)
-    assert (w.largura, w.altura) == (128, 128)
-    assert (gm.Z_MIN, gm.Z_MAX) == (-64, 64)
-    alturas = set()
-    for y in range(128):
-        for x in range(128):
-            mar = x < 8 or y < 8 or x >= 120 or y >= 120
-            sup = w.superficie(x, y)
-            if mar:
-                assert sup == 0
-                assert w.material(x, y, 1) == MAT.AR
-                for z in (0, -5, -10):
-                    assert w.material(x, y, z) == MAT.AGUA
-                    assert w.nivel_agua(x, y, z) == 10
-                assert w.material(x, y, -11) == MAT.PEDRA
-            else:
-                assert 1 <= sup <= 4, sup
-                alturas.add(sup)
-                assert w.material(x, y, sup + 1) == MAT.AR
-                # topo: grama; se está em +4, neve
-                assert w.material(x, y, sup) == (MAT.NEVE if sup == 4 else MAT.GRAMA)
-                for z in range(sup - 1, -4, -1):
+    """Gerador: mar, planícies/morros/vales, camadas e vales alagados."""
+    from collections import deque
+    for semente in (1, 2, 3):
+        w = gm.Mundo(semente)
+        assert (w.largura, w.altura) == (128, 128)
+        assert (gm.Z_MIN, gm.Z_MAX) == (-64, 64)
+        vale = morro = planicie = 0
+        for y in range(128):
+            for x in range(128):
+                mar = x < 8 or y < 8 or x >= 120 or y >= 120
+                if mar:
+                    assert w.superficie(x, y) == 0
+                    for z in (0, -5, -10):
+                        assert w.material(x, y, z) == MAT.AGUA
+                        assert w.nivel_agua(x, y, z) == 10
+                    assert w.material(x, y, -11) == MAT.PEDRA
+                    continue
+                # chão = primeira célula que não é ar nem água, de cima p/ baixo
+                chao = w.superficie(x, y)
+                while w.material(x, y, chao) == MAT.AGUA:
+                    chao -= 1
+                assert -4 <= chao <= 4, chao
+                if chao >= 2:
+                    morro += 1
+                elif chao == 1:
+                    planicie += 1
+                else:
+                    vale += 1
+                topo = w.material(x, y, chao)
+                if chao == 4:
+                    assert topo == MAT.NEVE
+                elif chao < -3:
+                    assert topo == MAT.PEDRA          # pedra exposta
+                else:
+                    assert topo == MAT.GRAMA
+                for z in range(chao - 1, -4, -1):
                     assert w.material(x, y, z) == MAT.TERRA
-                assert w.material(x, y, -4) == MAT.PEDRA
-                assert w.material(x, y, -64) == MAT.PEDRA
-    assert alturas == {1, 2, 3, 4}, alturas
-    print("ok  mundo 128x128, z -64..+64; mar 0..-10 sobre pedra; terra com "
-          "relevo +1..+4: grama no topo (neve em +4), terra até -3, pedra abaixo")
+                assert w.material(x, y, min(chao - 1, -4)) == MAT.PEDRA
+                # acima do chão: só água (até o 0) ou ar
+                for z in range(chao + 1, 6):
+                    m = w.material(x, y, z)
+                    assert m in (MAT.AR, MAT.AGUA)
+                    if m == MAT.AGUA:
+                        assert z <= 0
+        total = 112 * 112
+        for nome, qtd in (("vale", vale), ("morro", morro), ("planície", planicie)):
+            alvo = 0.4 if nome == "planície" else 0.3
+            assert abs(qtd / total - alvo) < 0.01, (nome, qtd / total)
+
+        # Água na terra só se ligada ao mar; e todo ar abaixo de 0 ligado ao
+        # mar foi preenchido (o vale ligado ao mar está cheio).
+        visto = set()
+        fila = deque((x, y, z) for y in range(128) for x in range(128)
+                     for z in range(-10, 1)
+                     if (x < 8 or y < 8 or x >= 120 or y >= 120))
+        visto.update(fila)
+        while fila:
+            x, y, z = fila.popleft()
+            for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, -1)):
+                p = (x + dx, y + dy, z + dz)
+                if p in visto or not (0 <= p[0] < 128 and 0 <= p[1] < 128) or p[2] > 0:
+                    continue
+                m = w.material(*p)
+                assert m != MAT.AR, f"ar ligado ao mar sem água em {p}"
+                if m == MAT.AGUA:
+                    visto.add(p)
+                    fila.append(p)
+        agua_terra = [(x, y, z) for y in range(8, 120) for x in range(8, 120)
+                      for z in range(-4, 1) if w.material(x, y, z) == MAT.AGUA]
+        assert all(p in visto for p in agua_terra), "água isolada do mar"
+    print("ok  gerador: mar 0..-10 sobre pedra; 30% vale / 30% morro / 40% planície "
+          "(+1); morros até +4 (neve), vales até -4 (pedra exposta); grama, "
+          "terra até -3, pedra; vales ligados ao mar cheios, os outros secos")
 
 
 def teste_inicio():
@@ -167,7 +211,7 @@ def teste_geral(sementes=50, duracao=3600):
             for n in vivos_:
                 assert w.ocupante(n.pos.x, n.pos.y) == O.NPC
                 assert n.pos.z == w.superficie(n.pos.x, n.pos.y)
-                assert w.material(n.pos.x, n.pos.y, n.pos.z) in (MAT.GRAMA, MAT.NEVE)
+                assert w.material(n.pos.x, n.pos.y, n.pos.z) in (MAT.GRAMA, MAT.NEVE, MAT.PEDRA)
                 # Só vai comer com fome < 70, e só vai beber com sede < 50.
                 if n.estado == E.INDO_COMER:
                     assert n.fome < 70

@@ -21,10 +21,17 @@ inline constexpr int BORDA_AGUA = 8;
 inline constexpr int Z_MIN = -64;
 inline constexpr int Z_MAX = 64;
 inline constexpr int NIVEL_DO_MAR = 0;
-// Superfície da terra: entre +1 e +4 (morros). O topo é grama; abaixo,
-// terra até o -3; dali para baixo, pedra.
-inline constexpr int SUPERFICIE_MIN = 1;
-inline constexpr int SUPERFICIE_MAX = 4;
+// Superfície da terra (pedido em 14/11/2026): planícies, morros e vales.
+//   - 30% da terra é vale, 30% é morro, o resto (40%) é planície;
+//   - planície no +1 (PROVISÓRIO: era o chão mais baixo antes dos vales);
+//   - morros sobem até o +4; vales descem até o -4.
+// O topo é grama; abaixo, terra até o -3; dali para baixo, pedra.
+// Se o fundo de um vale fica abaixo do -3 (no -4), o topo é pedra exposta.
+inline constexpr int PLANICIE_Z = 1;            // PROVISÓRIO
+inline constexpr int SUPERFICIE_MAX = 4;        // topo dos morros mais altos
+inline constexpr int VALE_MIN_Z = -4;           // fundo dos vales mais fundos
+inline constexpr double FRACAO_VALE = 0.30;
+inline constexpr double FRACAO_MORRO = 0.30;
 inline constexpr int TERRA_ATE_Z = -3;
 // Topo da superfície em +4 (o máximo) vira neve no lugar da grama.
 inline constexpr int NEVE_A_PARTIR_Z = 4;
