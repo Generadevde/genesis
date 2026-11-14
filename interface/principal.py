@@ -60,13 +60,14 @@ NOME_ESTADO = {
 GRAMA_BYTE = int(gm.Terreno.GRAMA)
 
 # Teclas: o terminal manda as setas como sequências de 3 caracteres.
-# Cada seta move a câmera 1 célula (a menor unidade do mapa).
-SETAS = {
-    b"\x1b[A": (0, -1),  # cima
-    b"\x1b[B": (0, 1),   # baixo
-    b"\x1b[C": (1, 0),   # direita
-    b"\x1b[D": (-1, 0),  # esquerda
-}
+# Existem dois formatos, conforme o modo do terminal: ESC [ A ou ESC O A.
+# Aceitamos os dois. Cada seta move a câmera 1 célula (a menor unidade).
+SETAS = {}
+for _prefixo in (b"\x1b[", b"\x1bO"):
+    SETAS[_prefixo + b"A"] = (0, -1)  # cima
+    SETAS[_prefixo + b"B"] = (0, 1)   # baixo
+    SETAS[_prefixo + b"C"] = (1, 0)   # direita
+    SETAS[_prefixo + b"D"] = (-1, 0)  # esquerda
 
 
 def desenhar_linha(terreno: bytes, ocupacao: bytes) -> Text:
