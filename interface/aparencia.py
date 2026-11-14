@@ -33,6 +33,7 @@ COR_CRUZ = BRANCO              # corpo do NPC morto (✝)
 COR_TERRA = (170, 85, 0)       # PROVISÓRIO: o marrom clássico das telas de 16 cores
 COR_PEDRA = CINZA              # cinza do Windows 98 (#C0C0C0)
 COR_NEVE = BRANCO              # neve "n" branca (pedido do dono do projeto)
+COR_AREIA = (255, 255, 0)      # areia "a" amarelo claro (amarelo claro da paleta de 16 cores)
 COR_MUDA = (0, 255, 0)         # muda "♣" verde-claro (verde claro da paleta de 16 cores)
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 //   z vai de Z_MIN (-64) a Z_MAX (+64); z = 0 é o nível do mar.
 //
 // Cada célula guarda:
-//   - material: ar, grama, neve, terra, pedra ou água;
+//   - material: ar, grama, neve, areia, terra, pedra ou água;
 //   - nível de água (0 a 10). Só faz sentido quando o material é água:
 //     10 = cheia (100%), 1 = 10%. Nível 0 = sem água (vira ar).
 //
@@ -32,6 +32,7 @@ enum class Material : std::uint8_t {
     Pedra = 3,
     Agua = 4,
     Neve = 5,   // topo dos morros mais altos (+4)
+    Areia = 6,  // chão do nível 0 encostado no mar
 };
 
 class Mapa3D {

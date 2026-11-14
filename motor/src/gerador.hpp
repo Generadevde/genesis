@@ -8,6 +8,7 @@
 //     (até -4). Topo = grama (neve se está em +4; pedra exposta se está
 //     abaixo do -3); abaixo do topo, terra até o -3; dali para baixo, pedra.
 //   - Vales ligados ao mar enchem de água até o nível do mar (0).
+//   - Chão no nível do mar (0) encostado na água do mar vira areia.
 //
 // O relevo vem de "ruído suave": valores sorteados numa grade espaçada e
 // interpolados com suavidade entre os pontos (value noise), somando

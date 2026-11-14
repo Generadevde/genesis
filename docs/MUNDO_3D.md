@@ -14,6 +14,7 @@ mundos, com as 3 dimensões **x, y, z**. Tamanho continua 128 × 128.
 |---|---|---|
 | Grama | `"` | verde |
 | Neve | `n` | branco |
+| Areia | `a` | amarelo claro |
 | Terra | `d` | marrom |
 | Pedra | `p` | cinza |
 | Água | `~` | azul |
@@ -30,6 +31,11 @@ mundos, com as 3 dimensões **x, y, z**. Tamanho continua 128 × 128.
 - **Vales e água**: um vale abaixo do nível do mar **enche de água só se
   estiver ligado ao mar**; pode encostar na costa (e o mar entra). Vale
   fundo isolado fica **seco**.
+- **Areia** (pedido em 14/11/2026): o chão cujo topo fica **no nível 0** e
+  **encosta no mar** (ou num vale alagado ligado a ele) vira **areia**.
+  "Encostar" = alguma das 8 colunas vizinhas tem água no topo, no nível 0
+  (PROVISÓRIO: as diagonais contam). Era o "bug" da terra no nível 0 ao lado
+  da água: não era água faltando — a célula 0 é chão, na altura da água.
 - **Mar** (a borda de 8 células, que continua): **água do 0 até o −10**;
   abaixo, **pedra**.
 - Relevo **"médio"**. Mais pra frente vira opção editável.

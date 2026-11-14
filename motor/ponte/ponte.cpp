@@ -47,7 +47,8 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("TERRA", Material::Terra)
         .value("PEDRA", Material::Pedra)
         .value("AGUA", Material::Agua)
-        .value("NEVE", Material::Neve);
+        .value("NEVE", Material::Neve)
+        .value("AREIA", Material::Areia);
 
     py::enum_<Ocupante>(m, "Ocupante")
         .value("NADA", Ocupante::Nada)

@@ -63,7 +63,12 @@ def teste_mapa():
                 elif chao < -3:
                     assert topo == MAT.PEDRA          # pedra exposta
                 else:
-                    assert topo == MAT.GRAMA
+                    # chão no nível 0 encostado na água do mar (8 vizinhas) = areia
+                    encosta = chao == 0 and any(
+                        w.material(x + dx, y + dy, 0) == MAT.AGUA and
+                        w.superficie(x + dx, y + dy) == 0
+                        for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy)
+                    assert topo == (MAT.AREIA if encosta else MAT.GRAMA), (x, y, chao, topo)
                 for z in range(chao - 1, -4, -1):
                     assert w.material(x, y, z) == MAT.TERRA
                 assert w.material(x, y, min(chao - 1, -4)) == MAT.PEDRA
@@ -101,7 +106,8 @@ def teste_mapa():
         assert all(p in visto for p in agua_terra), "água isolada do mar"
     print("ok  gerador: mar 0..-10 sobre pedra; 30% vale / 30% morro / 40% planície "
           "(+1); morros até +4 (neve), vales até -4 (pedra exposta); grama, "
-          "terra até -3, pedra; vales ligados ao mar cheios, os outros secos")
+          "terra até -3, pedra; vales ligados ao mar cheios, os outros secos; "
+          "areia no nível 0 encostado no mar")
 
 
 def teste_inicio():
@@ -216,7 +222,8 @@ def teste_geral(sementes=50, duracao=3600):
             for n in vivos_:
                 assert w.ocupante(n.pos.x, n.pos.y) == O.NPC
                 assert n.pos.z == w.superficie(n.pos.x, n.pos.y)
-                assert w.material(n.pos.x, n.pos.y, n.pos.z) in (MAT.GRAMA, MAT.NEVE, MAT.PEDRA)
+                assert w.material(n.pos.x, n.pos.y, n.pos.z) in (MAT.GRAMA, MAT.NEVE,
+                                                                  MAT.PEDRA, MAT.AREIA)
                 # Só vai comer com fome < 70, e só vai beber com sede < 50.
                 if n.estado == E.INDO_COMER:
                     assert n.fome < 70

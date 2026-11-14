@@ -171,6 +171,30 @@ void gerar_mundo(Mapa3D& mapa, std::uint64_t semente) {
         }
     }
     mapa.recalcular_superficies();
+
+    // --- 4) Areia ------------------------------------------------------------
+    // Pedido do dono: o chão cujo topo está no nível do mar (0) e encosta no
+    // mar vira areia. "Encostar" = alguma das 8 colunas vizinhas tem água no
+    // topo, no nível 0 (o mar, ou um vale ligado a ele) — PROVISÓRIO: 8
+    // vizinhas (as diagonais contam).
+    std::vector<std::array<int, 2>> areia;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < L; ++x) {
+            if (mapa.superficie(x, y) != cfg::NIVEL_DO_MAR) continue;
+            if (mapa.material(x, y, cfg::NIVEL_DO_MAR) == Material::Agua) continue;
+            bool encosta = false;
+            for (int dy = -1; dy <= 1 && !encosta; ++dy)
+                for (int dx = -1; dx <= 1 && !encosta; ++dx) {
+                    const int nx = x + dx, ny = y + dy;
+                    if ((dx || dy) && nx >= 0 && ny >= 0 && nx < L && ny < H &&
+                        mapa.material(nx, ny, cfg::NIVEL_DO_MAR) == Material::Agua &&
+                        mapa.superficie(nx, ny) == cfg::NIVEL_DO_MAR)
+                        encosta = true;
+                }
+            if (encosta) areia.push_back({x, y});
+        }
+    for (const auto& [x, y] : areia)
+        mapa.definir(x, y, cfg::NIVEL_DO_MAR, Material::Areia);
 }
 
 }  // namespace genesis

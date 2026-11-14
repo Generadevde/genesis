@@ -58,6 +58,7 @@ MATERIAL = {
     int(MAT.AR): (" ", A.FUNDO_MAPA, "Ar"),
     int(MAT.GRAMA): ('"', A.COR_GRAMA, "Grama"),
     int(MAT.NEVE): ("n", A.COR_NEVE, "Neve"),
+    int(MAT.AREIA): ("a", A.COR_AREIA, "Areia"),
     int(MAT.TERRA): ("d", A.COR_TERRA, "Terra"),
     int(MAT.PEDRA): ("p", A.COR_PEDRA, "Pedra"),
     int(MAT.AGUA): ("~", A.COR_AGUA, "Água"),
@@ -98,6 +99,7 @@ PRIORIDADE = {
     int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
     int(OC.MACIEIRA_SECA): 6, int(OC.MUDA): 5.5,  # PROVISÓRIO
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
+    COD_MATERIAL + int(MAT.AREIA): 5,
     COD_MATERIAL + int(MAT.AGUA): 4,
     COD_MATERIAL + int(MAT.TERRA): 3, COD_MATERIAL + int(MAT.PEDRA): 2,
     COD_MATERIAL + int(MAT.AR): 1,
@@ -469,7 +471,7 @@ class Genesis:
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
         # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
-        fundo = A.FUNDO_MAPA if simb and simb in "\"ndp~♣ " else A.FUNDO_CAMPO
+        fundo = A.FUNDO_MAPA if simb and simb in "\"ndpa~♣ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
             # cor None = o símbolo em cinza (macieira seca)
