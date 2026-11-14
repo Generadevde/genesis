@@ -54,7 +54,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("MACIEIRA", Ocupante::Macieira)
         .value("MACA", Ocupante::Maca)
         .value("NPC", Ocupante::Npc)
-        .value("CORPO", Ocupante::Corpo);
+        .value("CORPO", Ocupante::Corpo)
+        .value("MUDA", Ocupante::Muda)
+        .value("MACIEIRA_SECA", Ocupante::MacieiraSeca);
 
     py::enum_<EstadoNpc>(m, "EstadoNpc")
         .value("VAGANDO", EstadoNpc::Vagando)
@@ -67,7 +69,17 @@ PYBIND11_MODULE(genesis_motor, m) {
 
     py::class_<Macieira>(m, "Macieira")
         .def_readonly("pos", &Macieira::pos)
-        .def_readonly("falta_queda", &Macieira::falta_queda);
+        .def_readonly("nasceu", &Macieira::nasceu)
+        .def_readonly("quando_queda", &Macieira::quando_queda)
+        .def_readonly("quando_secar", &Macieira::quando_secar)
+        .def_readonly("quando_sumir", &Macieira::quando_sumir)
+        .def_readonly("seca", &Macieira::seca)
+        .def_readonly("existe", &Macieira::existe);
+
+    py::class_<Muda>(m, "Muda")
+        .def_readonly("pos", &Muda::pos)
+        .def_readonly("nasceu", &Muda::nasceu)
+        .def_readonly("quando_virar", &Muda::quando_virar);
 
     py::class_<Npc>(m, "Npc")
         .def_readonly("id", &Npc::id)
@@ -90,6 +102,7 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("minuto", &Mundo::Relogio::minuto);
 
     m.attr("SEGUNDOS_POR_HORA") = config::SEGUNDOS_POR_HORA;
+    m.attr("SEGUNDOS_POR_DIA") = config::SEGUNDOS_POR_DIA;
 
     py::class_<Mundo>(m, "Mundo")
         .def(py::init<std::uint64_t>(), py::arg("semente"))
@@ -121,6 +134,14 @@ PYBIND11_MODULE(genesis_motor, m) {
              "SÓ PARA TESTES: muda uma célula do chão à mão.")
         .def("macieiras", &Mundo::macieiras)
         .def("macas", &Mundo::macas)
+        .def("mudas", &Mundo::mudas)
+        .def("macieira_em", &Mundo::macieira_em, py::arg("x"), py::arg("y"))
+        .def("muda_em", [](const Mundo& w, int x, int y) -> py::object {
+            const Muda* u = w.muda_em(x, y);
+            if (!u) return py::none();
+            return py::cast(*u);
+        }, py::arg("x"), py::arg("y"))
+        .def("falta_virar_muda", &Mundo::falta_virar_muda, py::arg("x"), py::arg("y"))
         .def("npcs", &Mundo::npcs)
         // Mapa inteiro como bytes (1 byte por célula, linha por linha).
         // O valor de cada byte é o número do enum (Terreno / Ocupante).

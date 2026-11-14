@@ -2,6 +2,10 @@
 // mundo.hpp — o mundo da simulação: a ilha e tudo que existe nela.
 //
 // Como o tempo funciona (simulação por EVENTOS):
+//   (Desde a vida vegetal, as plantas — que podem ser milhares — guardam a
+//   HORA em que algo vai acontecer, e essas horas ficam numa FILA ordenada
+//   (fila_). Assim o motor acha o próximo acontecimento sem olhar planta
+//   por planta. Os NPCs, que são poucos, continuam com relógios regressivos.)
 //   Cada coisa que acontece de tempos em tempos tem um "relógio" que conta
 //   quanto falta para o próximo acontecimento:
 //     - cada NPC: próximo passo (1 s), próxima queda de fome (5 s),
@@ -30,6 +34,8 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
+#include <queue>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -48,7 +54,11 @@ struct Pos {
 };
 
 // O que ocupa uma célula (no máximo uma coisa por célula).
-enum class Ocupante : std::uint8_t { Nada = 0, Macieira, Maca, Npc, Corpo };
+enum class Ocupante : std::uint8_t {
+    Nada = 0, Macieira, Maca, Npc, Corpo,
+    Muda,          // maçã que ninguém pegou em 6 h (vira macieira em 3 dias)
+    MacieiraSeca   // macieira com mais de 7 dias: cinza, sem maçãs, some em 4 h
+};
 
 // O que o NPC está fazendo agora.
 enum class EstadoNpc : std::uint8_t {
@@ -61,9 +71,25 @@ enum class EstadoNpc : std::uint8_t {
     IndoPegar      // sem fome, viu uma maçã: indo pegar para carregar
 };
 
+// Uma macieira. Ela NUNCA sai da lista (o número dela é usado na memória
+// dos NPCs e na origem das maçãs); quando some, fica com existe = false.
+// (Os "quando_" são horas da simulação, em segundos desde o início.)
 struct Macieira {
     Pos pos;
-    double falta_queda = 0.0;  // segundos até a próxima maçã cair
+    double nasceu = 0.0;        // quando virou árvore
+    double quando_queda = 0.0;  // quando cai a próxima maçã
+    double quando_secar = 0.0;  // quando seca (7 dias de vida)
+    double quando_sumir = 0.0;  // seca: quando some (4 horas depois)
+    bool seca = false;
+    bool existe = true;
+};
+
+// Uma muda (♣): nasce de uma maçã esquecida no chão.
+struct Muda {
+    int id = 0;
+    Pos pos;
+    double nasceu = 0.0;
+    double quando_virar = 0.0;  // quando vira macieira (3 dias)
 };
 
 struct Npc {
@@ -117,6 +143,13 @@ public:
     Ocupante ocupante(int x, int y) const;
     const Mapa3D& mapa() const { return mapa_; }
     const std::vector<Macieira>& macieiras() const { return macieiras_; }
+    std::vector<Muda> mudas() const;
+    // Maçã no chão em (x, y): quantos segundos faltam para virar muda
+    // (negativo se não há maçã ali).
+    double falta_virar_muda(int x, int y) const;
+    // Qual macieira / muda está em (x, y)? (-1 / nullptr se nenhuma)
+    int macieira_em(int x, int y) const;
+    const Muda* muda_em(int x, int y) const;
     std::vector<Pos> macas() const;
     // A ocupação inteira de uma vez (1 byte por coluna, linha por linha).
     const std::vector<Ocupante>& ocupacao_bruta() const { return ocupacao_; }
@@ -141,6 +174,16 @@ private:
     void evento_fim_comer(Npc& n);
     void evento_fim_beber(Npc& n);
     void evento_queda_maca(int indice_macieira);
+    void evento_maca_vira_muda(int indice_celula);
+    void evento_muda_vira_arvore(int id_muda);
+    void agendar(double quando, int tipo, int alvo);
+    void ocupar(int indice_celula, Ocupante novo);
+    void contar_livres();
+    void evento_macieira_seca(Macieira& m);
+    void evento_macieira_some(Macieira& m);
+    void por_maca_no_chao(int indice_celula, int origem);
+    void tirar_maca_do_chao(int indice_celula);
+    void nova_macieira(Pos p);
 
     // --- Ajudantes --------------------------------------------------------
     bool dentro(Pos p) const;
@@ -156,6 +199,7 @@ private:
     bool tentar_pegar(Npc& n);
     void lembrar_macieira(Npc& n, int arvore);
     bool soltar_maca_perto(Pos onde, int origem);
+    bool camada_livres(Pos centro, int r, std::vector<Pos>& livres) const;
     bool tentar_beber(Npc& n);
     void passo_em_direcao(Npc& n, Pos alvo);
     bool ir_a_macieira_lembrada(Npc& n);
@@ -173,6 +217,26 @@ private:
     // É assim que o NPC sabe qual macieira lembrar depois de comer.
     std::vector<int> origem_maca_;
     std::vector<Macieira> macieiras_;
+    std::map<int, Muda> mudas_;  // por id (ordem fixa)
+    int proximo_id_muda_ = 0;
+    int livres_terra_ = 0;  // células de terra sem nada em cima (ver ocupar)
+    // Maçã no chão (célula) -> quando vira muda (6 horas depois de cair).
+    std::unordered_map<int, double> quando_muda_;
+
+    // Fila de acontecimentos das plantas, a mais cedo primeiro.
+    // Um acontecimento que ficou velho (a maçã foi pegada, a árvore já
+    // secou...) é reconhecido na hora de sair da fila e ignorado.
+    struct Evento {
+        double quando;
+        int tipo;   // ver Mundo::agendar
+        int alvo;   // número da macieira, célula da maçã ou id da muda
+        bool operator>(const Evento& o) const {
+            if (quando != o.quando) return quando > o.quando;
+            if (tipo != o.tipo) return tipo > o.tipo;
+            return alvo > o.alvo;
+        }
+    };
+    std::priority_queue<Evento, std::vector<Evento>, std::greater<Evento>> fila_;
     std::vector<Npc> npcs_;
     // Maçã reservada -> id do NPC que está indo comer/comendo.
     // Evita dois NPCs comendo a mesma maçã.

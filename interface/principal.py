@@ -49,6 +49,8 @@ SIMBOLO = {
     int(OC.MACA): "🍎",
     int(OC.NPC): "🗿",
     int(OC.CORPO): "✝",
+    int(OC.MUDA): "♣",
+    int(OC.MACIEIRA_SECA): "🌳",  # desenhada em cinza (ver Simbolos.get)
 }
 MAT = gm.Material
 # Materiais do chão: símbolo, cor e nome (escolhidos pelo dono do projeto).
@@ -93,6 +95,7 @@ COD_MATERIAL = 100
 # a neve fica junto da grama (PROVISÓRIO).
 PRIORIDADE = {
     int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
+    int(OC.MACIEIRA_SECA): 6, int(OC.MUDA): 5.5,  # PROVISÓRIO
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
     COD_MATERIAL + int(MAT.AGUA): 4,
     COD_MATERIAL + int(MAT.TERRA): 3, COD_MATERIAL + int(MAT.PEDRA): 2,
@@ -110,6 +113,19 @@ def decodificar(byte_visao: int, ocupante: int) -> int:
     if byte_visao & 0x20 and ocupante:
         return ocupante
     return COD_MATERIAL + material
+
+
+def duracao(segundos: float) -> str:
+    """Tempo do jogo por extenso: "2 dias 5 h", "3 h 20 min", "45 min".
+    (1 hora do jogo = SEGUNDOS_POR_HORA segundos da simulação.)"""
+    minutos = max(0, int(segundos / (gm.SEGUNDOS_POR_HORA / 60)))
+    dias, resto = divmod(minutos, 24 * 60)
+    horas, mins = divmod(resto, 60)
+    if dias:
+        return f"{dias} dia{'s' if dias > 1 else ''} {horas} h"
+    if horas:
+        return f"{horas} h {mins} min"
+    return f"{mins} min"
 
 
 class Simbolos:
@@ -136,8 +152,16 @@ class Simbolos:
             self._fontes_mapa[tamanho] = pygame.font.Font(A.FONTE_MAPA, tamanho)
         return self._fontes_mapa[tamanho]
 
-    def get(self, simbolo: str, lado: int, cor=A.PRETO) -> pygame.Surface:
-        """Símbolo no tamanho `lado`, na cor `cor` (emojis têm cor própria)."""
+    def get(self, simbolo: str, lado: int, cor=A.PRETO,
+            cinza: bool = False) -> pygame.Surface:
+        """Símbolo no tamanho `lado`, na cor `cor` (emojis têm cor própria).
+        `cinza` = o mesmo desenho em tons de cinza (macieira seca)."""
+        if cinza:
+            chave = (simbolo, lado, cor, "cinza")
+            if chave not in self._cache:
+                self._cache[chave] = pygame.transform.grayscale(
+                    self.get(simbolo, lado, cor))
+            return self._cache[chave]
         chave = (simbolo, lado, cor)
         if chave not in self._cache:
             emoji = ord(simbolo[0]) > 0x1F000
@@ -343,8 +367,9 @@ class Genesis:
             if simb == " ":
                 return None  # ar sem nada embaixo: fica preto
             return self.simbolos.get(simb, lado, cor)
-        cor = A.COR_CRUZ if cod == int(OC.CORPO) else A.PRETO
-        return self.simbolos.get(SIMBOLO[cod], lado, cor)
+        cor = {int(OC.CORPO): A.COR_CRUZ, int(OC.MUDA): A.COR_MUDA}.get(cod, A.PRETO)
+        return self.simbolos.get(SIMBOLO[cod], lado, cor,
+                                 cinza=(cod == int(OC.MACIEIRA_SECA)))
 
     def linhas_tabela(self):
         return [[n.nome, f"{n.fome:.0f}", f"{n.sede:.0f}",
@@ -395,10 +420,26 @@ class Genesis:
         # Árvore e maçã ficam na superfície.
         if z == self.mundo.superficie(x, y):
             o = self.mundo.ocupante(x, y)
-            if o == OC.MACIEIRA:
-                return "🌳", A.PRETO, ["Macieira", pos]
+            agora = self.mundo.tempo
+            if o in (OC.MACIEIRA, OC.MACIEIRA_SECA):
+                m = self.mundo.macieiras()[self.mundo.macieira_em(x, y)]
+                linhas = ["Macieira seca" if m.seca else "Macieira", pos,
+                          f"Idade: {duracao(agora - m.nasceu)}"]
+                if m.seca:
+                    linhas.append(f"Some em: {duracao(m.quando_sumir - agora)}")
+                else:
+                    linhas.append(f"Seca em: {duracao(m.quando_secar - agora)}")
+                # cor None = desenhar em cinza (macieira seca)
+                return "🌳", (None if m.seca else A.PRETO), linhas
             if o == OC.MACA:
-                return "🍎", A.PRETO, ["Maçã", pos]
+                falta = self.mundo.falta_virar_muda(x, y)
+                return "🍎", A.PRETO, ["Maçã", pos,
+                                       f"Vira muda em: {duracao(falta)}"]
+            if o == OC.MUDA:
+                u = self.mundo.muda_em(x, y)
+                return "♣", A.COR_MUDA, ["Muda", pos,
+                                         f"Idade: {duracao(agora - u.nasceu)}",
+                                         f"Vira macieira em: {duracao(u.quando_virar - agora)}"]
         m = int(self.mundo.material(x, y, z))
         simb, cor, nome = MATERIAL[m]
         linhas = [nome, pos]
@@ -427,10 +468,13 @@ class Genesis:
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
         # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
-        fundo = A.FUNDO_MAPA if simb and simb in "\"ndp~ " else A.FUNDO_CAMPO
+        fundo = A.FUNDO_MAPA if simb and simb in "\"ndp~♣ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
-            img = self.simbolos.get(simb, A.TAM_SIMBOLO_GRANDE, cor)
+            # cor None = o símbolo em cinza (macieira seca)
+            img = self.simbolos.get(simb, A.TAM_SIMBOLO_GRANDE,
+                                    cor if cor is not None else A.PRETO,
+                                    cinza=cor is None)
             self.tela.blit(img, (quadro.centerx - img.get_width() // 2,
                                  quadro.centery - img.get_height() // 2))
         y = quadro.bottom + 2 * A.ESPACO
@@ -497,6 +541,10 @@ class Genesis:
                 return n.nome if cod == int(OC.NPC) else f"Corpo de {n.nome}"
         if cod == int(OC.MACIEIRA):
             return "Macieira"
+        if cod == int(OC.MACIEIRA_SECA):
+            return "Macieira seca"
+        if cod == int(OC.MUDA):
+            return "Muda"
         if cod == int(OC.MACA):
             return "Maçã"
         return MATERIAL[cod - COD_MATERIAL][2]

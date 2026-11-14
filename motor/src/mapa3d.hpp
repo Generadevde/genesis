@@ -68,6 +68,8 @@ public:
     // A água nunca é criada nem destruída: só muda de lugar.
     void passo_agua(std::mt19937_64& rng);
     long long agua_total() const;  // soma de todos os níveis (para testes)
+    // A água está parada (o próximo passo não moveria nada)?
+    bool agua_parada() const { return agua_parada_; }
 
     // --- Visão de uma camada (para a interface) ----------------------------
     // Para cada coluna, olhando de cima a partir do nível z para baixo:

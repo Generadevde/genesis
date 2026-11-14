@@ -99,6 +99,16 @@ inline constexpr double MACA_RECUPERA = 12.0;
 // Cada macieira derruba 1 maçã a cada 30 a 60 s (sorteado de novo a cada queda).
 inline constexpr double QUEDA_MIN_S = 30.0;
 inline constexpr double QUEDA_MAX_S = 60.0;
+// --- Vida vegetal (pedida em 14/11/2026) -----------------------------------
+// Maçã no chão que ninguém pega em 6 horas vira muda.
+inline constexpr double MACA_VIRA_MUDA_H = 6.0;
+// A muda vira macieira depois de 3 dias.
+inline constexpr double MUDA_VIRA_ARVORE_DIAS = 3.0;
+// A macieira vive 7 dias; depois fica seca (cinza, sem maçãs) por 4 horas
+// e some.
+inline constexpr double MACIEIRA_VIDA_DIAS = 7.0;
+inline constexpr double MACIEIRA_SECA_H = 4.0;
+
 // Comer uma maçã leva 10 s.
 inline constexpr double COMER_DURACAO_S = 10.0;
 

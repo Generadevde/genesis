@@ -16,6 +16,15 @@ namespace cfg = config;
 
 namespace {
 
+// Tipos de acontecimento das plantas (na fila).
+enum TipoEvento : int {
+    QUEDA_MACA = 0,      // alvo = número da macieira
+    MACIEIRA_SECA = 1,   // alvo = número da macieira
+    MACIEIRA_SOME = 2,   // alvo = número da macieira
+    MACA_VIRA_MUDA = 3,  // alvo = célula da maçã
+    MUDA_VIRA_ARVORE = 4 // alvo = id da muda
+};
+
 // Margem de arredondamento para comparar tempos em ponto flutuante.
 // Não é regra do jogo: só evita que 0.9999999 deixe de contar como "venceu".
 constexpr double EPS = 1e-9;
@@ -47,16 +56,12 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
     const size_t colunas = static_cast<size_t>(largura()) * altura();
     ocupacao_.assign(colunas, Ocupante::Nada);
     origem_maca_.assign(colunas, -1);
+    contar_livres();
     falta_agua_ = cfg::AGUA_INTERVALO_S;
 
-    // 6 macieiras em células de grama livres, sorteadas ("espalhadas").
-    for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) {
-        Macieira m;
-        m.pos = sortear_grama_livre();
-        m.falta_queda = sortear_queda();
-        ocupacao_[indice(m.pos)] = Ocupante::Macieira;
-        macieiras_.push_back(m);
-    }
+    // 6 macieiras em células de terra livres, sorteadas ("espalhadas").
+    // Todas nascem com idade 0 (decisão do dono do projeto).
+    for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) nova_macieira(sortear_grama_livre());
 
     // 4 NPCs em células de grama livres, com fome e sede iniciais 100.
     for (int i = 0; i < cfg::NUM_NPCS; ++i) {
@@ -69,7 +74,7 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
         n.falta_passo = cfg::NPC_PASSO_S;
         n.falta_fome = cfg::FOME_INTERVALO_S;
         n.falta_sede = cfg::SEDE_INTERVALO_S;
-        ocupacao_[indice(n.pos)] = Ocupante::Npc;
+        ocupar(indice(n.pos), Ocupante::Npc);
         npcs_.push_back(n);
     }
 }
@@ -84,6 +89,42 @@ Pos Mundo::sortear_grama_livre() {
         Pos p{dx(rng_), dy(rng_)};
         if (livre(p)) return com_z(p);
     }
+}
+
+// Uma macieira nova (do começo, ou que cresceu de uma muda): idade 0.
+void Mundo::nova_macieira(Pos p) {
+    Macieira m;
+    m.pos = com_z(p);
+    m.nasceu = tempo_;
+    m.quando_queda = tempo_ + sortear_queda();
+    m.quando_secar = tempo_ + cfg::MACIEIRA_VIDA_DIAS * cfg::SEGUNDOS_POR_DIA;
+    ocupar(indice(m.pos), Ocupante::Macieira);
+    const int i = static_cast<int>(macieiras_.size());
+    macieiras_.push_back(m);
+    agendar(m.quando_queda, QUEDA_MACA, i);
+    agendar(m.quando_secar, MACIEIRA_SECA, i);
+}
+
+// Toda mudança de ocupante passa por aqui, para manter a conta de quantas
+// células de terra estão livres (usada para não procurar lugar à toa
+// quando a ilha está lotada).
+void Mundo::ocupar(int i, Ocupante novo) {
+    const int x = i % largura(), y = i / largura();
+    const bool terra = mapa_.e_terra(x, y);
+    if (terra && ocupacao_[i] == Ocupante::Nada) --livres_terra_;
+    ocupacao_[i] = novo;
+    if (terra && novo == Ocupante::Nada) ++livres_terra_;
+}
+
+void Mundo::contar_livres() {
+    livres_terra_ = 0;
+    for (int y = 0; y < altura(); ++y)
+        for (int x = 0; x < largura(); ++x)
+            if (livre({x, y})) ++livres_terra_;
+}
+
+void Mundo::agendar(double quando, int tipo, int alvo) {
+    fila_.push({quando, tipo, alvo});
 }
 
 // Tempo até a próxima maçã: sorteado entre 30 e 60 s, a cada queda.
@@ -108,9 +149,9 @@ void Mundo::avancar(double dt) {
             if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
                 proximo = std::min(proximo, n.falta_acao);
         }
-        for (const Macieira& m : macieiras_)
-            proximo = std::min(proximo, m.falta_queda);
+        if (!fila_.empty()) proximo = std::min(proximo, fila_.top().quando - tempo_);
         proximo = std::min(proximo, falta_agua_);
+        proximo = std::max(proximo, 0.0);
 
         // 2) Anda o relógio até ele (ou até o fim do dt, o que vier antes).
         const double passo = std::min(proximo, restante);
@@ -124,10 +165,9 @@ void Mundo::avancar(double dt) {
             if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
                 n.falta_acao -= passo;
         }
-        for (Macieira& m : macieiras_) m.falta_queda -= passo;
         falta_agua_ -= passo;
 
-        // 3) Dispara tudo que venceu, em ordem fixa (NPCs, depois macieiras).
+        // 3) Dispara tudo que venceu: NPCs, água, depois as plantas.
         for (Npc& n : npcs_) {
             if (n.estado != EstadoNpc::Morto && n.falta_fome <= EPS) {
                 n.falta_fome += cfg::FOME_INTERVALO_S;
@@ -149,13 +189,46 @@ void Mundo::avancar(double dt) {
         // A cada 3 s: um passo da física da água.
         if (falta_agua_ <= EPS) {
             falta_agua_ += cfg::AGUA_INTERVALO_S;
-            mapa_.passo_agua(rng_);
+            if (!mapa_.agua_parada()) {
+                mapa_.passo_agua(rng_);
+                contar_livres();  // a água pode cobrir ou descobrir terra
+            }
         }
-        for (int i = 0; i < static_cast<int>(macieiras_.size()); ++i) {
-            Macieira& m = macieiras_[i];
-            if (m.falta_queda <= EPS) {
-                m.falta_queda += sortear_queda();
-                evento_queda_maca(i);
+        // Plantas: tira da fila tudo que já venceu, na ordem da fila.
+        while (!fila_.empty() && fila_.top().quando <= tempo_ + EPS) {
+            const Evento e = fila_.top();
+            fila_.pop();
+            switch (e.tipo) {
+                case QUEDA_MACA: {
+                    Macieira& m = macieiras_[e.alvo];
+                    if (!m.existe || m.seca || e.quando != m.quando_queda) break;
+                    m.quando_queda += sortear_queda();
+                    agendar(m.quando_queda, QUEDA_MACA, e.alvo);
+                    evento_queda_maca(e.alvo);
+                    break;
+                }
+                case MACIEIRA_SECA: {
+                    Macieira& m = macieiras_[e.alvo];
+                    if (!m.existe || m.seca) break;
+                    evento_macieira_seca(m);  // seca não derruba mais maçã
+                    agendar(m.quando_sumir, MACIEIRA_SOME, e.alvo);
+                    break;
+                }
+                case MACIEIRA_SOME: {
+                    Macieira& m = macieiras_[e.alvo];
+                    if (!m.existe || !m.seca) break;
+                    evento_macieira_some(m);
+                    break;
+                }
+                case MACA_VIRA_MUDA: {
+                    auto it = quando_muda_.find(e.alvo);
+                    if (it == quando_muda_.end() || it->second != e.quando) break;
+                    evento_maca_vira_muda(e.alvo);
+                    break;
+                }
+                case MUDA_VIRA_ARVORE:
+                    if (mudas_.count(e.alvo)) evento_muda_vira_arvore(e.alvo);
+                    break;
             }
         }
     }
@@ -277,10 +350,9 @@ bool Mundo::tentar_pegar(Npc& n) {
     if (!procurar_maca(n, maca)) return false;
     if (distancia_passos(n.pos, maca) == 1) {
         const int i = indice(maca);
-        ocupacao_[i] = Ocupante::Nada;
         n.macas_carregadas += 1;
         n.origem_carregada = origem_maca_[i];
-        origem_maca_[i] = -1;
+        tirar_maca_do_chao(i);
         lembrar_macieira(n, n.origem_carregada);
         n.estado = EstadoNpc::Vagando;
         n.tem_alvo = false;
@@ -296,7 +368,7 @@ bool Mundo::tentar_pegar(Npc& n) {
 }
 
 void Mundo::lembrar_macieira(Npc& n, int arvore) {
-    if (arvore >= 0 &&
+    if (arvore >= 0 && macieiras_[arvore].existe &&
         std::find(n.macieiras_lembradas.begin(), n.macieiras_lembradas.end(),
                   arvore) == n.macieiras_lembradas.end())
         n.macieiras_lembradas.push_back(arvore);
@@ -347,7 +419,16 @@ bool Mundo::ir_a_macieira_lembrada(Npc& n) {
             return false;
         }
         const Pos arvore = macieiras_[melhor].pos;
-        if (melhor_d <= 1) {  // chegou e não há maçã à vista: próxima
+        if (melhor_d <= 1) {
+            if (!macieiras_[melhor].existe) {
+                // Chegou e a macieira não existe mais: esquece dela
+                // (decisão do dono do projeto).
+                n.macieiras_lembradas.erase(
+                    std::find(n.macieiras_lembradas.begin(),
+                              n.macieiras_lembradas.end(), melhor));
+                continue;
+            }
+            // Chegou e não há maçã à vista: passa para a próxima.
             n.macieiras_vistas_vazias.push_back(melhor);
             continue;
         }
@@ -415,9 +496,8 @@ void Mundo::evento_fim_comer(Npc& n) {
     // Memória: lembra a macieira de onde veio esta maçã (se ainda não lembra).
     lembrar_macieira(n, origem_maca_[i]);
     n.macieiras_vistas_vazias.clear();  // comeu: a busca recomeça do zero
-    ocupacao_[i] = Ocupante::Nada;
-    origem_maca_[i] = -1;
     reservas_.erase(i);
+    tirar_maca_do_chao(i);
     n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
@@ -434,25 +514,124 @@ void Mundo::evento_fim_beber(Npc& n) {
     n.tem_alvo = false;
 }
 
+// Camada r em volta de `centro` = as células a exatamente r passos dele
+// (r = 1: as 8 vizinhas). Põe em `livres` as que estão livres. Percorre só
+// a BORDA da camada (8·r células), não o quadrado inteiro.
+// Devolve falso quando a camada já está toda fora do mapa (não há mais
+// onde procurar).
+bool Mundo::camada_livres(Pos centro, int r, std::vector<Pos>& livres) const {
+    livres.clear();
+    if (livres_terra_ <= 0) return false;  // ilha lotada: não há onde cair
+    if (centro.x - r < 0 && centro.y - r < 0 && centro.x + r >= largura() &&
+        centro.y + r >= altura())
+        return false;
+    auto testar = [&](int x, int y) {
+        Pos p{x, y};
+        if (livre(p)) livres.push_back(p);
+    };
+    for (int dx = -r; dx <= r; ++dx) {         // linha de cima e de baixo
+        testar(centro.x + dx, centro.y - r);
+        testar(centro.x + dx, centro.y + r);
+    }
+    for (int dy = -r + 1; dy <= r - 1; ++dy) {  // lados (sem os cantos)
+        testar(centro.x - r, centro.y + dy);
+        testar(centro.x + r, centro.y + dy);
+    }
+    return true;
+}
+
+// --- Vida vegetal -------------------------------------------------------
+
+// Toda maçã que vai para o chão passa por aqui: marca a célula, guarda de
+// qual macieira veio e começa a contar as 6 horas para virar muda.
+// (Maçã que foi pegada e solta de novo recomeça a contagem.)
+void Mundo::por_maca_no_chao(int i, int origem) {
+    ocupar(i, Ocupante::Maca);
+    origem_maca_[i] = origem;
+    quando_muda_[i] = tempo_ + cfg::MACA_VIRA_MUDA_H * cfg::SEGUNDOS_POR_HORA;
+    agendar(quando_muda_[i], MACA_VIRA_MUDA, i);
+}
+
+// Toda maçã que sai do chão (pegada ou comida) passa por aqui.
+void Mundo::tirar_maca_do_chao(int i) {
+    ocupar(i, Ocupante::Nada);
+    origem_maca_[i] = -1;
+    quando_muda_.erase(i);
+}
+
+// 6 horas no chão sem ninguém pegar: a maçã vira muda na mesma célula.
+// Se alguém está comendo ela neste momento, espera: ou ela é comida, ou
+// (se quem comia morrer) vira muda nessa hora — ver Mundo::morrer.
+void Mundo::evento_maca_vira_muda(int i) {
+    if (reservas_.count(i)) return;
+    quando_muda_.erase(i);
+    origem_maca_[i] = -1;
+    ocupar(i, Ocupante::Muda);
+    Muda u;
+    u.id = proximo_id_muda_++;
+    u.pos = com_z({i % largura(), i / largura()});
+    u.nasceu = tempo_;
+    u.quando_virar = tempo_ + cfg::MUDA_VIRA_ARVORE_DIAS * cfg::SEGUNDOS_POR_DIA;
+    mudas_[u.id] = u;
+    agendar(u.quando_virar, MUDA_VIRA_ARVORE, u.id);
+}
+
+// 3 dias depois: a muda vira macieira (idade 0, derruba maçãs normalmente).
+void Mundo::evento_muda_vira_arvore(int id) {
+    const Pos p = mudas_.at(id).pos;
+    mudas_.erase(id);
+    nova_macieira(p);
+}
+
+std::vector<Muda> Mundo::mudas() const {
+    std::vector<Muda> r;
+    r.reserve(mudas_.size());
+    for (const auto& [id, u] : mudas_) r.push_back(u);
+    return r;
+}
+
+// 7 dias de vida: a macieira seca (cinza) e para de derrubar maçãs.
+void Mundo::evento_macieira_seca(Macieira& m) {
+    m.seca = true;
+    m.quando_sumir = tempo_ + cfg::MACIEIRA_SECA_H * cfg::SEGUNDOS_POR_HORA;
+    ocupar(indice(m.pos), Ocupante::MacieiraSeca);
+}
+
+// 4 horas seca: some. A célula fica livre. (Fica na lista com existe =
+// false, para os números das outras macieiras não mudarem.)
+void Mundo::evento_macieira_some(Macieira& m) {
+    m.existe = false;
+    ocupar(indice(m.pos), Ocupante::Nada);
+}
+
+int Mundo::macieira_em(int x, int y) const {
+    for (int i = static_cast<int>(macieiras_.size()) - 1; i >= 0; --i)
+        if (macieiras_[i].existe && macieiras_[i].pos.x == x && macieiras_[i].pos.y == y)
+            return i;
+    return -1;
+}
+
+const Muda* Mundo::muda_em(int x, int y) const {
+    for (const auto& [id, u] : mudas_)
+        if (u.pos.x == x && u.pos.y == y) return &u;
+    return nullptr;
+}
+
+double Mundo::falta_virar_muda(int x, int y) const {
+    auto it = quando_muda_.find(indice({x, y}));
+    return it == quando_muda_.end() ? -1.0 : it->second - tempo_;
+}
+
 // Uma maçã cai em volta da macieira: na primeira camada que tiver célula
 // de grama livre (camada 1 = as 8 vizinhas; se lotada, camada 2; e assim
 // por diante). Dentro da camada, a célula é sorteada.
 void Mundo::evento_queda_maca(int indice_macieira) {
     const Macieira& m = macieiras_[indice_macieira];
-    const int max_camada = std::max(largura(), altura());
-    for (int r = 1; r <= max_camada; ++r) {
-        std::vector<Pos> opcoes;
-        for (int dy = -r; dy <= r; ++dy)
-            for (int dx = -r; dx <= r; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
-                Pos p{m.pos.x + dx, m.pos.y + dy};
-                if (livre(p)) opcoes.push_back(com_z(p));
-            }
+    std::vector<Pos> opcoes;
+    for (int r = 1; camada_livres(m.pos, r, opcoes); ++r) {
         if (!opcoes.empty()) {
             std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-            const int i = indice(opcoes[d(rng_)]);
-            ocupacao_[i] = Ocupante::Maca;
-            origem_maca_[i] = indice_macieira;  // de onde ela caiu
+            por_maca_no_chao(indice(opcoes[d(rng_)]), indice_macieira);
             return;
         }
     }
@@ -576,13 +755,13 @@ bool Mundo::procurar_agua(const Npc& n, Pos& achada) const {
 // próximo passo só vem depois de 5 s em vez de 1 s.
 void Mundo::mover(Npc& n, Pos destino) {
     destino = com_z(destino);
-    ocupacao_[indice(n.pos)] = Ocupante::Nada;
+    ocupar(indice(n.pos), Ocupante::Nada);
     if (destino.z != n.pos.z)
         n.falta_passo += cfg::NPC_SUBIR_S - cfg::NPC_PASSO_S;
     n.anterior = n.pos;
     n.tem_anterior = true;
     n.pos = destino;
-    ocupacao_[indice(n.pos)] = Ocupante::Npc;
+    ocupar(indice(n.pos), Ocupante::Npc);
 }
 
 // Morre (de fome ou de sede): o corpo fica no mapa ocupando a célula.
@@ -590,12 +769,18 @@ void Mundo::mover(Npc& n, Pos destino) {
 // Se carregava uma maçã (mesmo se estava comendo ela), a maçã cai numa
 // célula livre ao lado do corpo (decisão do dono do projeto).
 void Mundo::morrer(Npc& n) {
-    if (n.estado == EstadoNpc::Comendo && !n.comendo_da_mao)
-        reservas_.erase(indice(n.alvo));
+    if (n.estado == EstadoNpc::Comendo && !n.comendo_da_mao) {
+        const int i = indice(n.alvo);
+        reservas_.erase(i);
+        // Se o prazo de virar muda já passou enquanto ele comia, vira agora.
+        auto it = quando_muda_.find(i);
+        if (it != quando_muda_.end() && it->second <= tempo_ + EPS)
+            evento_maca_vira_muda(i);
+    }
     n.estado = EstadoNpc::Morto;
     n.tem_alvo = false;
     n.comendo_da_mao = false;
-    ocupacao_[indice(n.pos)] = Ocupante::Corpo;
+    ocupar(indice(n.pos), Ocupante::Corpo);
     while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, n.origem_carregada))
         n.macas_carregadas -= 1;
     n.origem_carregada = -1;
@@ -604,20 +789,11 @@ void Mundo::morrer(Npc& n) {
 // Põe uma maçã no chão na célula livre mais perto de `onde` (camada 1 =
 // as 8 vizinhas; se lotada, a próxima camada), sorteada dentro da camada.
 bool Mundo::soltar_maca_perto(Pos onde, int origem) {
-    const int max_camada = std::max(largura(), altura());
-    for (int r = 1; r <= max_camada; ++r) {
-        std::vector<Pos> opcoes;
-        for (int dy = -r; dy <= r; ++dy)
-            for (int dx = -r; dx <= r; ++dx) {
-                if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
-                Pos p{onde.x + dx, onde.y + dy};
-                if (livre(p)) opcoes.push_back(p);
-            }
+    std::vector<Pos> opcoes;
+    for (int r = 1; camada_livres(onde, r, opcoes); ++r) {
         if (!opcoes.empty()) {
             std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-            const int i = indice(opcoes[d(rng_)]);
-            ocupacao_[i] = Ocupante::Maca;
-            origem_maca_[i] = origem;
+            por_maca_no_chao(indice(opcoes[d(rng_)]), origem);
             return true;
         }
     }
@@ -652,6 +828,7 @@ std::vector<std::uint8_t> Mundo::visao(int z) const {
 void Mundo::teste_definir(int x, int y, int z, Material m, int nivel_agua) {
     mapa_.definir(x, y, z, m, nivel_agua);
     mapa_.recalcular_superficie(x, y);
+    contar_livres();
 }
 
 }  // namespace genesis

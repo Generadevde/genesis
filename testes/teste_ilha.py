@@ -207,7 +207,9 @@ def teste_geral(sementes=50, duracao=3600):
             mortos = [n for n in npcs if n.estado == E.MORTO]
             assert oc.count(int(O.NPC)) == len(vivos_)
             assert oc.count(int(O.CORPO)) == len(mortos)
-            assert oc.count(int(O.MACIEIRA)) == 6
+            existem = [m for m in w.macieiras() if m.existe]
+            assert (oc.count(int(O.MACIEIRA)) + oc.count(int(O.MACIEIRA_SECA))
+                    == len(existem))
             for n in vivos_:
                 assert w.ocupante(n.pos.x, n.pos.y) == O.NPC
                 assert n.pos.z == w.superficie(n.pos.x, n.pos.y)
@@ -409,6 +411,53 @@ def teste_relogio():
     print("ok  relógio: 1 h = 60 s, 1 dia = 24 min reais; começa no Dia 1, 00:00")
 
 
+def teste_vegetal():
+    """Maçã esquecida 6 h -> muda; muda 3 dias -> macieira; macieira 7 dias
+    -> seca (cinza, sem maçãs) por 4 h -> some."""
+    H = gm.SEGUNDOS_POR_HORA
+    DIA = gm.SEGUNDOS_POR_DIA
+    w = gm.Mundo(7)
+    iniciais = [m.pos for m in w.macieiras()]
+
+    # 1) Maçã esquecida: depois que os NPCs morreram, ninguém pega.
+    w.avancar(1000)
+    assert all(n.estado == E.MORTO for n in w.npcs())
+    p = w.macas()[0]
+    falta = w.falta_virar_muda(p.x, p.y)
+    assert 0 < falta <= 6 * H
+    w.avancar(falta - 0.01)
+    assert w.ocupante(p.x, p.y) == O.MACA
+    w.avancar(0.02)
+    assert w.ocupante(p.x, p.y) == O.MUDA
+    u = w.muda_em(p.x, p.y)
+    assert abs(u.quando_virar - u.nasceu - 3 * DIA) < 1e-6
+
+    # 2) Muda vira macieira 3 dias depois, com idade 0.
+    w.avancar(u.quando_virar - w.tempo - 0.01)
+    assert w.ocupante(p.x, p.y) == O.MUDA
+    w.avancar(0.02)
+    assert w.ocupante(p.x, p.y) == O.MACIEIRA
+    nova = w.macieiras()[w.macieira_em(p.x, p.y)]
+    assert abs(nova.nasceu - u.quando_virar) < 1e-6
+
+    # 3) As 6 do começo (idade 0) secam aos 7 dias e somem 4 h depois.
+    w.avancar(7 * DIA - w.tempo - 0.01)
+    assert all(w.ocupante(q.x, q.y) == O.MACIEIRA for q in iniciais)
+    w.avancar(0.02)
+    assert all(w.ocupante(q.x, q.y) == O.MACIEIRA_SECA for q in iniciais)
+    secas = [m for m in w.macieiras()[:6]]
+    assert all(m.seca and m.existe for m in secas)
+    # Seca não derruba maçã: nas 4 h, nenhuma maçã nova cai com origem nelas
+    # (a próxima queda agendada delas é ignorada).
+    w.avancar(4 * H - 0.02)
+    assert all(w.ocupante(q.x, q.y) == O.MACIEIRA_SECA for q in iniciais)
+    w.avancar(0.04)
+    assert all(w.ocupante(q.x, q.y) != O.MACIEIRA_SECA for q in iniciais)
+    assert all(not m.existe for m in w.macieiras()[:6])
+    print("ok  vida vegetal: maçã esquecida 6 h vira muda; muda vira macieira "
+          "em 3 dias; macieira seca aos 7 dias, fica 4 h cinza e some")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_relogio()
@@ -419,6 +468,7 @@ if __name__ == "__main__":
     teste_acoes()
     teste_memoria()
     teste_carregar()
+    teste_vegetal()
     teste_relevo_npc()
     teste_agua()
     teste_geral()

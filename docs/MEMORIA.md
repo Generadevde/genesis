@@ -10,7 +10,8 @@ macieira e a água; quando fica com fome (ou sede), volta lá.
     **pegou para carregar** (desde 14/11/2026, ver [CARREGAR.md](CARREGAR.md));
   - a **célula de água** onde ele **bebeu**.
 - Lembra **todos** esses lugares.
-- **Nunca esquece.**
+- **Nunca esquece** — exceto (desde a vida vegetal) a macieira que ele vai
+  ver e **não existe mais**: aí ele esquece dela ([VIDA_VEGETAL.md](VIDA_VEGETAL.md)).
 - Com fome, volta à macieira lembrada. **Se chegar lá e não houver maçã,
   vai para outra** macieira que lembra.
 - Com sede, volta à água lembrada.

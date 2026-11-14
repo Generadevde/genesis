@@ -11,4 +11,5 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Memória dos NPCs: [docs/MEMORIA.md](docs/MEMORIA.md)
 - Sistema de tempo: [docs/TEMPO.md](docs/TEMPO.md)
 - Nomes e carregar maçã: [docs/CARREGAR.md](docs/CARREGAR.md)
+- Vida vegetal: [docs/VIDA_VEGETAL.md](docs/VIDA_VEGETAL.md)
 - Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

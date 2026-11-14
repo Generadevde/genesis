@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.6: sistema de tempo (docs/TEMPO.md).
-    return "Genesis — motor 0.6 (tempo)";
+    // Versão 0.7: vida vegetal (docs/VIDA_VEGETAL.md).
+    return "Genesis — motor 0.7 (vida vegetal)";
 }
 
 }  // namespace genesis
