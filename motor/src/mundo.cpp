@@ -23,7 +23,11 @@ enum TipoEvento : int {
     MACIEIRA_SECA = 1,   // alvo = número da macieira
     MACIEIRA_SOME = 2,   // alvo = número da macieira
     MACA_VIRA_MUDA = 3,  // alvo = célula da maçã
-    MUDA_VIRA_ARVORE = 4 // alvo = id da muda
+    MUDA_VIRA_ARVORE = 4, // alvo = id da muda
+    VIRA_ADULTO = 5,      // alvo = id do bebê
+    VELHICE = 6,          // alvo = id do NPC
+    NASCIMENTO = 7,       // alvo = id da mãe
+    CONCEPCAO = 8         // alvo = id da mãe (1 h juntos no abrigo)
 };
 
 // Margem de arredondamento para comparar tempos em ponto flutuante.
@@ -52,7 +56,7 @@ constexpr Pos VIZINHOS[8] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
 // Criação do mundo
 // ===========================================================================
 
-Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
+Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
     gerar_mundo(mapa_, semente);
     const size_t colunas = static_cast<size_t>(largura()) * altura();
     ocupacao_.assign(colunas, Ocupante::Nada);
@@ -73,21 +77,35 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
         pedras_.push_back(p);
     }
 
-    // 4 NPCs em células de grama livres, com fome e sede iniciais 100.
-    for (int i = 0; i < cfg::NUM_NPCS; ++i) {
+    // NPCs iniciais: `homens` homens e `mulheres` mulheres, em células de
+    // terra livres, com 20 anos, fome e sede 100. Nomes "NPC 1", "NPC 2"...
+    // e o sexo de cada número é sorteado. Se a terra lotar, para.
+    std::vector<Sexo> sexos;
+    for (int i = 0; i < homens; ++i) sexos.push_back(Sexo::Homem);
+    for (int i = 0; i < mulheres; ++i) sexos.push_back(Sexo::Mulher);
+    std::shuffle(sexos.begin(), sexos.end(), rng_);
+    for (size_t i = 0; i < sexos.size() && livres_terra_ > 0; ++i) {
         Npc n;
-        n.id = i;
-        n.nome = cfg::NOMES_NPC[i];
-        n.pos = sortear_grama_livre();
+        n.id = static_cast<int>(npcs_.size());
+        n.nome = "NPC " + std::to_string(n.id + 1);
+        n.sexo = sexos[i];
+        n.idade_ref_anos = cfg::IDADE_INICIAL_ANOS;
+        n.idade_ref_t = 0.0;
         n.hp = cfg::HP_INICIAL;
         n.fome = cfg::FOME_INICIAL;
         n.sede = cfg::SEDE_INICIAL;
         n.falta_passo = cfg::NPC_PASSO_S;
         n.falta_fome = cfg::FOME_INTERVALO_S;
         n.falta_sede = cfg::SEDE_INTERVALO_S;
+        n.pos = sortear_grama_livre();
         ocupar(indice(n.pos), Ocupante::Npc);
+        // Morre de velhice aos 60 anos.
+        n.quando_velhice = (cfg::IDADE_MAXIMA_ANOS - cfg::IDADE_INICIAL_ANOS) *
+                           cfg::SEGUNDOS_POR_ANO;
+        agendar(n.quando_velhice, VELHICE, n.id);
         npcs_.push_back(n);
     }
+    registrar(TipoRegistro::Inicio, homens, mulheres);
 }
 
 // Sorteia uma célula de grama ainda vazia (só a terra do meio é sorteada).
@@ -154,7 +172,7 @@ void Mundo::avancar(double dt) {
         // 1) Qual é o próximo acontecimento? (o relógio que vence primeiro)
         double proximo = std::numeric_limits<double>::infinity();
         for (const Npc& n : npcs_) {
-            if (n.estado == EstadoNpc::Morto) continue;
+            if (n.estado == EstadoNpc::Morto || n.bebe) continue;
             proximo = std::min({proximo, n.falta_fome, n.falta_sede,
                                 n.falta_passo});
             if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo ||
@@ -170,7 +188,7 @@ void Mundo::avancar(double dt) {
         std::vector<double> taxas(npcs_.size(), 0.0);
         for (size_t k = 0; k < npcs_.size(); ++k) {
             const Npc& n = npcs_[k];
-            if (n.estado == EstadoNpc::Morto) continue;
+            if (n.estado == EstadoNpc::Morto || n.bebe) continue;
             taxas[k] = taxa_hp(n);
             if (taxas[k] < 0) proximo = std::min(proximo, n.hp / -taxas[k]);
         }
@@ -181,7 +199,7 @@ void Mundo::avancar(double dt) {
         tempo_ += passo;
         restante -= passo;
         for (Npc& n : npcs_) {
-            if (n.estado == EstadoNpc::Morto) continue;
+            if (n.estado == EstadoNpc::Morto || n.bebe) continue;
             n.falta_fome -= passo;
             n.falta_sede -= passo;
             n.falta_passo -= passo;
@@ -191,7 +209,7 @@ void Mundo::avancar(double dt) {
         }
         for (size_t k = 0; k < npcs_.size(); ++k) {
             Npc& n = npcs_[k];
-            if (n.estado == EstadoNpc::Morto) continue;
+            if (n.estado == EstadoNpc::Morto || n.bebe) continue;
             n.hp = std::min(cfg::HP_MAXIMO, n.hp + taxas[k] * passo);
             if (n.hp <= EPS) {  // HP chegou a 0: morre
                 n.hp = 0.0;
@@ -201,7 +219,9 @@ void Mundo::avancar(double dt) {
         falta_agua_ -= passo;
 
         // 3) Dispara tudo que venceu: NPCs, água, depois as plantas.
-        for (Npc& n : npcs_) {
+        for (size_t k = 0; k < npcs_.size(); ++k) {
+            Npc& n = npcs_[k];
+            if (n.bebe) continue;  // bebê: fica parado, sem necessidades
             if (n.estado != EstadoNpc::Morto && n.falta_fome <= EPS) {
                 n.falta_fome += cfg::FOME_INTERVALO_S;
                 evento_fome(n);
@@ -264,6 +284,26 @@ void Mundo::avancar(double dt) {
                 case MUDA_VIRA_ARVORE:
                     if (mudas_.count(e.alvo)) evento_muda_vira_arvore(e.alvo);
                     break;
+                case VIRA_ADULTO:
+                    evento_adulto(e.alvo);
+                    break;
+                case VELHICE:
+                    if (e.quando == npcs_[e.alvo].quando_velhice) evento_velhice(e.alvo);
+                    break;
+                case NASCIMENTO: {
+                    const Npc& m = npcs_[e.alvo];
+                    if (m.estado != EstadoNpc::Morto && m.gravida &&
+                        e.quando == m.quando_nascer)
+                        evento_nascimento(e.alvo);
+                    break;
+                }
+                case CONCEPCAO: {
+                    const Npc& m = npcs_[e.alvo];
+                    if (m.procriando_desde >= 0.0 &&
+                        e.quando == m.procriando_desde + cfg::PROCRIAR_H * cfg::SEGUNDOS_POR_HORA)
+                        evento_concepcao(e.alvo);
+                    break;
+                }
             }
         }
     }
@@ -304,10 +344,17 @@ void Mundo::evento_sede(Npc& n) {
 //   - Nada à vista (ou nada baixo): anda aleatoriamente.
 // Empate: a sede vem primeiro — PROVISÓRIO, aguardando o dono.
 void Mundo::evento_passo(Npc& n) {
-    // --- Dentro do abrigo: dorme até as 06:00; depois sai ------------------
+    if (n.bebe) return;  // bebê: fica parado (por enquanto)
+
+    // --- Dentro do abrigo: à noite dorme; de dia, só fica se está ali para
+    //     procriar (esperando o parceiro ou junto com ele); senão sai -------
     if (n.dentro_abrigo >= 0) {
-        if (e_dia()) sair_abrigo(n);
-        else n.estado = EstadoNpc::Dormindo;
+        // Se o casal está junto e a mulher passou a poder engravidar agora
+        // (ex.: acabaram os 7 dias enquanto dormiam), começa a contar.
+        ver_se_comeca_procriar(n.dentro_abrigo);
+        if (!e_dia()) n.estado = EstadoNpc::Dormindo;
+        else if (quer_procriar(n)) n.estado = EstadoNpc::Procriando;
+        else sair_abrigo(n);
         return;
     }
     if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
@@ -325,6 +372,7 @@ void Mundo::evento_passo(Npc& n) {
     }
 
     conhecer_abrigos(n);
+    formar_casal(n);
 
     // --- Necessidades, na ordem da URGÊNCIA (tempo até ficar crítica) -----
     // (frio só conta se ele tem abrigo para onde ir)
@@ -347,6 +395,9 @@ void Mundo::evento_passo(Npc& n) {
     // --- Saciado (sem fome nem sede): sem abrigo, a necessidade é fazer um
     //     (por causa da temperatura). Também retoma trabalho que parou.
     if (!com_fome && !com_sede && cadeia_abrigo(n)) return;
+
+    // --- Necessidade secundária: reprodução (o casal vai ao abrigo dele) ---
+    if (tentar_procriar(n)) return;
 
     // --- Sem precisar comer/beber: se vê uma maçã e tem a mão livre, vai
     //     pegar para levar consigo (pedido do dono do projeto).
@@ -736,6 +787,7 @@ void Mundo::evento_maca_vira_muda(int i) {
     u.quando_virar = tempo_ + cfg::MUDA_VIRA_ARVORE_DIAS * cfg::SEGUNDOS_POR_DIA;
     mudas_[u.id] = u;
     agendar(u.quando_virar, MUDA_VIRA_ARVORE, u.id);
+    registrar(TipoRegistro::MudaNasceu, -1, -1, -1, u.pos);
 }
 
 // 3 dias depois: a muda vira macieira (idade 0, derruba maçãs normalmente).
@@ -743,6 +795,7 @@ void Mundo::evento_muda_vira_arvore(int id) {
     const Pos p = mudas_.at(id).pos;
     mudas_.erase(id);
     nova_macieira(p);
+    registrar(TipoRegistro::ArvoreNasceu, -1, -1, -1, p);
 }
 
 std::vector<Muda> Mundo::mudas() const {
@@ -757,6 +810,7 @@ void Mundo::evento_macieira_seca(Macieira& m) {
     m.seca = true;
     m.quando_sumir = tempo_ + cfg::MACIEIRA_SECA_H * cfg::SEGUNDOS_POR_HORA;
     ocupar(indice(m.pos), Ocupante::MacieiraSeca);
+    registrar(TipoRegistro::ArvoreSecou, -1, -1, -1, m.pos);
 }
 
 // 4 horas seca: some. A célula fica livre. (Fica na lista com existe =
@@ -764,6 +818,7 @@ void Mundo::evento_macieira_seca(Macieira& m) {
 void Mundo::evento_macieira_some(Macieira& m) {
     m.existe = false;
     ocupar(indice(m.pos), Ocupante::Nada);
+    registrar(TipoRegistro::ArvoreSumiu, -1, -1, -1, m.pos);
 }
 
 int Mundo::macieira_em(int x, int y) const {
@@ -802,6 +857,11 @@ double Mundo::duracao_tarefa(Tarefa t) const {
 // para onde ele vai quando faz frio.
 void Mundo::conhecer_abrigos(Npc& n) {
     if (n.abrigo_casa >= 0) return;
+    // Tem par com abrigo? Vai morar com ele (dormem juntos).
+    if (n.parceiro >= 0 && npcs_[n.parceiro].abrigo_casa >= 0) {
+        unir_abrigo_casal(n, npcs_[n.parceiro]);
+        if (n.abrigo_casa >= 0) return;
+    }
     const int metade = cfg::VISAO_LADO / 2;
     for (int a = 0; a < static_cast<int>(abrigos_.size()); ++a) {
         const Abrigo& ab = abrigos_[a];
@@ -810,6 +870,7 @@ void Mundo::conhecer_abrigos(Npc& n) {
         if (static_cast<int>(ab.moradores.size()) >= cfg::ABRIGO_VAGAS) continue;
         abrigos_[a].moradores.push_back(n.id);
         n.abrigo_casa = a;
+        if (n.parceiro >= 0) unir_abrigo_casal(n, npcs_[n.parceiro]);
         return;
     }
 }
@@ -837,8 +898,9 @@ void Mundo::entrar_abrigo(Npc& n, int a) {
     n.pos = abrigos_[a].pos;
     n.dentro_abrigo = a;
     abrigos_[a].dentro.push_back(n.id);
-    n.estado = EstadoNpc::Dormindo;
+    n.estado = e_dia() ? EstadoNpc::Procriando : EstadoNpc::Dormindo;
     n.tem_alvo = false;
+    ver_se_comeca_procriar(a);
 }
 
 // Sai para uma célula livre ao lado do abrigo (se não houver, espera).
@@ -849,6 +911,9 @@ void Mundo::sair_abrigo(Npc& n) {
         if (!pode_pisar(ab.pos, p)) continue;
         ab.dentro.erase(std::find(ab.dentro.begin(), ab.dentro.end(), n.id));
         n.dentro_abrigo = -1;
+        // Saiu: se o casal estava junto procriando, a contagem para.
+        n.procriando_desde = -1.0;
+        if (n.parceiro >= 0) npcs_[n.parceiro].procriando_desde = -1.0;
         n.pos = p;
         ocupar(indice(p), Ocupante::Npc);
         n.estado = EstadoNpc::Vagando;
@@ -1028,6 +1093,7 @@ void Mundo::fazer_machado(Npc& n) {
     n.lascas -= cfg::MACHADO_LASCAS;
     n.galhos -= cfg::MACHADO_GALHOS;
     n.machado = true;  // feito na hora; dura para sempre
+    registrar(TipoRegistro::MachadoFeito, n.id);
 }
 
 void Mundo::evento_fim_trabalho(Npc& n) {
@@ -1048,6 +1114,7 @@ void Mundo::evento_fim_trabalho(Npc& n) {
         if (p.lascas <= 0) {  // esgotou: a pedra some
             p.existe = false;
             ocupar(indice(p.pos), Ocupante::Nada);
+            registrar(TipoRegistro::PedraEsgotou, n.id, -1, -1, p.pos);
         }
         fazer_machado(n);
     } else if (t == Tarefa::Galhos) {
@@ -1061,6 +1128,7 @@ void Mundo::evento_fim_trabalho(Npc& n) {
         m.existe = false;  // a árvore (viva ou seca) some
         ocupar(indice(m.pos), Ocupante::Nada);
         n.lenha += cfg::LENHA_POR_ARVORE;
+        registrar(TipoRegistro::ArvoreCortada, n.id, -1, -1, m.pos);
     } else if (t == Tarefa::Construir) {
         n.lenha -= cfg::ABRIGO_LENHA;
         Abrigo ab;
@@ -1070,8 +1138,11 @@ void Mundo::evento_fim_trabalho(Npc& n) {
         const int a = static_cast<int>(abrigos_.size());
         abrigos_.push_back(ab);
         ocupar(indice(n.pos), Ocupante::Abrigo);
+        sair_de_morador(n);
         n.abrigo_casa = a;
         n.dentro_abrigo = a;
+        registrar(TipoRegistro::AbrigoFeito, n.id, -1, -1, n.pos);
+        if (n.parceiro >= 0) unir_abrigo_casal(n, npcs_[n.parceiro]);
     }
 }
 
@@ -1085,6 +1156,219 @@ int Mundo::abrigo_em(int x, int y) const {
     for (int i = 0; i < static_cast<int>(abrigos_.size()); ++i)
         if (abrigos_[i].pos.x == x && abrigos_[i].pos.y == y) return i;
     return -1;
+}
+
+// ===========================================================================
+// Família: casal, procriação, gravidez, bebê, adulto, velhice
+// ===========================================================================
+
+void Mundo::registrar(TipoRegistro t, int a, int b, int c, Pos pos) {
+    Registro r;
+    r.tempo = tempo_;
+    r.tipo = t;
+    r.a = a;
+    r.b = b;
+    r.c = c;
+    r.pos = pos;
+    historico_.push_back(r);
+}
+
+double Mundo::idade_anos(const Npc& n) const {
+    const double agora = n.morreu_em >= 0.0 ? n.morreu_em : tempo_;
+    return n.idade_ref_anos + (agora - n.idade_ref_t) / cfg::SEGUNDOS_POR_ANO;
+}
+
+// Célula livre mais perto de `centro` (camadas em volta; sorteada na camada).
+bool Mundo::lugar_livre_perto(Pos centro, Pos& achado) {
+    std::vector<Pos> opcoes;
+    for (int r = 1; camada_livres(centro, r, opcoes); ++r) {
+        if (!opcoes.empty()) {
+            std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
+            achado = opcoes[d(rng_)];
+            return true;
+        }
+    }
+    return false;
+}
+
+void Mundo::sair_de_morador(Npc& n) {
+    if (n.abrigo_casa < 0) return;
+    auto& mor = abrigos_[n.abrigo_casa].moradores;
+    auto it = std::find(mor.begin(), mor.end(), n.id);
+    if (it != mor.end()) mor.erase(it);
+    n.abrigo_casa = -1;
+}
+
+// Casal: um homem e uma mulher adultos, os dois sem par, que se veem na
+// mesma área (32 x 32), viram casal na hora (decisão do dono).
+void Mundo::formar_casal(Npc& n) {
+    if (n.bebe || n.parceiro >= 0) return;
+    const int metade = cfg::VISAO_LADO / 2;
+    int melhor = -1, melhor_d = 0;
+    for (const Npc& o : npcs_) {
+        if (o.id == n.id || o.bebe || o.estado == EstadoNpc::Morto) continue;
+        if (o.sexo == n.sexo || o.parceiro >= 0) continue;
+        const int dx = o.pos.x - n.pos.x, dy = o.pos.y - n.pos.y;
+        if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
+        const int d = distancia_passos(n.pos, o.pos);
+        if (melhor < 0 || d < melhor_d) { melhor = o.id; melhor_d = d; }
+    }
+    if (melhor < 0) return;
+    Npc& o = npcs_[melhor];
+    n.parceiro = o.id;
+    o.parceiro = n.id;
+    const Npc& h = (n.sexo == Sexo::Homem) ? n : o;
+    const Npc& m = (n.sexo == Sexo::Homem) ? o : n;
+    registrar(TipoRegistro::Casal, h.id, m.id);
+    unir_abrigo_casal(n, o);
+}
+
+// O casal dorme junto: passa a ter o mesmo abrigo. Se os dois têm abrigo,
+// fica o mais perto dos dois (PROVISÓRIO); se só um tem, o outro vai para
+// ele; se nenhum tem, isso acontece quando um deles conseguir um.
+void Mundo::unir_abrigo_casal(Npc& a, Npc& b) {
+    if (a.abrigo_casa >= 0 && a.abrigo_casa == b.abrigo_casa) return;
+    std::vector<int> opcoes;
+    if (a.abrigo_casa >= 0) opcoes.push_back(a.abrigo_casa);
+    if (b.abrigo_casa >= 0) opcoes.push_back(b.abrigo_casa);
+    auto custo = [&](int ab) {
+        return distancia_passos(a.pos, abrigos_[ab].pos) +
+               distancia_passos(b.pos, abrigos_[ab].pos);
+    };
+    std::sort(opcoes.begin(), opcoes.end(),
+              [&](int x, int y) { return custo(x) < custo(y); });
+    for (int alvo : opcoes) {
+        Npc& fora = (a.abrigo_casa == alvo) ? b : a;  // quem precisa mudar
+        int outros = 0;
+        for (int id : abrigos_[alvo].moradores)
+            if (id != fora.id) ++outros;
+        if (outros >= cfg::ABRIGO_VAGAS) continue;  // cheio: tenta o outro
+        sair_de_morador(fora);
+        abrigos_[alvo].moradores.push_back(fora.id);
+        fora.abrigo_casa = alvo;
+        return;
+    }
+}
+
+// Quer procriar agora? Adulto, com par vivo, o casal com o mesmo abrigo,
+// sem precisar comer nem beber, e a mulher podendo engravidar (não está
+// grávida e já passaram 7 dias do último parto).
+bool Mundo::quer_procriar(const Npc& n) const {
+    if (n.bebe || n.parceiro < 0) return false;
+    const Npc& p = npcs_[n.parceiro];
+    if (p.estado == EstadoNpc::Morto || p.bebe) return false;
+    if (n.abrigo_casa < 0 || n.abrigo_casa != p.abrigo_casa) return false;
+    if (n.dentro_abrigo < 0 &&
+        (n.fome < cfg::FOME_LIMITE_COMER || n.sede < cfg::SEDE_LIMITE_BEBER))
+        return false;
+    const Npc& m = (n.sexo == Sexo::Mulher) ? n : p;
+    return !m.gravida && tempo_ >= m.pode_engravidar_em;
+}
+
+// Vai ao abrigo do casal e entra (a qualquer hora do dia). Se está cheio,
+// espera ao lado.
+bool Mundo::tentar_procriar(Npc& n) {
+    if (!quer_procriar(n)) return false;
+    const Abrigo& ab = abrigos_[n.abrigo_casa];
+    const int desnivel = std::abs(ab.pos.z - n.pos.z);
+    if (distancia_passos(n.pos, ab.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX) {
+        if (static_cast<int>(ab.dentro.size()) < cfg::ABRIGO_VAGAS)
+            entrar_abrigo(n, n.abrigo_casa);
+        else
+            n.estado = EstadoNpc::IndoProcriar;  // cheio: espera
+        return true;
+    }
+    n.estado = EstadoNpc::IndoProcriar;
+    n.tem_alvo = true;
+    n.alvo = ab.pos;
+    passo_em_direcao(n, ab.pos);
+    return true;
+}
+
+// O casal está junto dentro do abrigo (de dia, ou dormindo à noite) e a
+// mulher pode engravidar: começa a contar 1 hora.
+void Mundo::ver_se_comeca_procriar(int a) {
+    for (int id : abrigos_[a].dentro) {
+        Npc& m = npcs_[id];
+        if (m.sexo != Sexo::Mulher || m.parceiro < 0 || m.procriando_desde >= 0.0) continue;
+        const Npc& h = npcs_[m.parceiro];
+        if (h.dentro_abrigo != a) continue;
+        if (m.gravida || tempo_ < m.pode_engravidar_em) continue;
+        m.procriando_desde = tempo_;
+        agendar(tempo_ + cfg::PROCRIAR_H * cfg::SEGUNDOS_POR_HORA, CONCEPCAO, m.id);
+    }
+}
+
+// 1 hora juntos: a mulher engravida (sempre dá certo).
+void Mundo::evento_concepcao(int mae) {
+    Npc& m = npcs_[mae];
+    m.procriando_desde = -1.0;
+    if (m.estado == EstadoNpc::Morto || m.parceiro < 0) return;
+    const Npc& h = npcs_[m.parceiro];
+    if (m.dentro_abrigo < 0 || h.dentro_abrigo != m.dentro_abrigo) return;
+    if (m.gravida || tempo_ < m.pode_engravidar_em) return;
+    m.gravida = true;
+    m.gravidez_pai = h.id;
+    m.quando_nascer = tempo_ + cfg::GRAVIDEZ_DIAS * cfg::SEGUNDOS_POR_DIA;
+    agendar(m.quando_nascer, NASCIMENTO, m.id);
+    registrar(TipoRegistro::Gravidez, m.id, h.id);
+}
+
+// 3 dias depois: nasce um bebê ao lado da mãe (sexo meio a meio).
+// Nome: "F." + nome da mãe; do 2º filho em diante, "2F.", "3F."...
+void Mundo::evento_nascimento(int mae) {
+    Pos onde;
+    if (!lugar_livre_perto(npcs_[mae].pos, onde)) return;  // sem lugar (PROVISÓRIO)
+    Npc& m = npcs_[mae];
+    m.gravida = false;
+    m.pode_engravidar_em = tempo_ + cfg::INTERVALO_FILHOS_DIAS * cfg::SEGUNDOS_POR_DIA;
+    m.filhos += 1;
+    Npc b;
+    b.id = static_cast<int>(npcs_.size());
+    b.nome = (m.filhos == 1 ? std::string("F.") : std::to_string(m.filhos) + "F.") + m.nome;
+    std::uniform_int_distribution<int> moeda(0, 1);
+    b.sexo = moeda(rng_) ? Sexo::Mulher : Sexo::Homem;
+    b.bebe = true;
+    b.estado = EstadoNpc::Bebe;
+    b.nasceu = tempo_;
+    b.idade_ref_anos = 0.0;
+    b.idade_ref_t = tempo_;
+    b.mae = m.id;
+    b.pai = m.gravidez_pai;
+    b.hp = cfg::HP_INICIAL;
+    b.fome = cfg::FOME_INICIAL;
+    b.sede = cfg::SEDE_INICIAL;
+    b.pos = com_z(onde);
+    const int pai = m.gravidez_pai;
+    m.gravidez_pai = -1;
+    ocupar(indice(b.pos), Ocupante::Npc);
+    npcs_.push_back(b);  // (depois disso, "m" não vale mais: a lista cresceu)
+    agendar(tempo_ + cfg::BEBE_VIRA_ADULTO_DIAS * cfg::SEGUNDOS_POR_DIA, VIRA_ADULTO, b.id);
+    registrar(TipoRegistro::Nascimento, b.id, mae, pai);
+}
+
+// 10 dias de vida: vira adulto e "salta" para 20 anos. Morre aos 60.
+void Mundo::evento_adulto(int id) {
+    Npc& n = npcs_[id];
+    if (n.estado == EstadoNpc::Morto || !n.bebe) return;
+    n.bebe = false;
+    n.estado = EstadoNpc::Vagando;
+    n.idade_ref_anos = cfg::IDADE_AO_VIRAR_ADULTO;
+    n.idade_ref_t = tempo_;
+    n.falta_passo = cfg::NPC_PASSO_S;
+    n.falta_fome = cfg::FOME_INTERVALO_S;
+    n.falta_sede = cfg::SEDE_INTERVALO_S;
+    n.quando_velhice = tempo_ + (cfg::IDADE_MAXIMA_ANOS - cfg::IDADE_AO_VIRAR_ADULTO) *
+                                    cfg::SEGUNDOS_POR_ANO;
+    agendar(n.quando_velhice, VELHICE, id);
+    registrar(TipoRegistro::VirouAdulto, id);
+}
+
+// 60 anos: morre de velhice.
+void Mundo::evento_velhice(int id) {
+    Npc& n = npcs_[id];
+    if (n.estado == EstadoNpc::Morto) return;
+    morrer(n, 8);
 }
 
 // Uma maçã cai em volta da macieira: na primeira camada que tiver célula
@@ -1184,6 +1468,7 @@ double Mundo::proximo_marco_temperatura() const {
 
 // HP: −5/s por necessidade no crítico (fome 0, sede 0, frio < 4°).
 double Mundo::taxa_hp(const Npc& n) const {
+    if (n.bebe) return 0.0;  // bebê: sem necessidades (por enquanto)
     // Dentro do abrigo: nada é crítico (nem frio, nem fome, nem sede) e o
     // HP se recupera 1 por segundo, até 100.
     if (n.dentro_abrigo >= 0)
@@ -1315,9 +1600,12 @@ void Mundo::mover(Npc& n, Pos destino) {
 
 // Morre (de fome ou de sede): o corpo fica no mapa ocupando a célula.
 // Se estava comendo, larga a maçã (ela continua lá para outro NPC).
-// Se carregava uma maçã (mesmo se estava comendo ela), a maçã cai numa
-// célula livre ao lado do corpo (decisão do dono do projeto).
-void Mundo::morrer(Npc& n) {
+// Morre (HP 0, ou velhice). O corpo fica no mapa ocupando a célula.
+// - Se carregava uma maçã (mesmo comendo ela), a maçã cai ao lado do corpo.
+// - Se estava grávida, o bebê morre junto (decisão do dono).
+// - O par fica livre para formar outro casal; a vaga de morador abre.
+// - Morreu dentro do abrigo: o corpo fica numa célula livre ao lado.
+void Mundo::morrer(Npc& n, int causa_extra) {
     if (n.estado == EstadoNpc::Comendo && !n.comendo_da_mao) {
         const int i = indice(n.alvo);
         reservas_.erase(i);
@@ -1326,16 +1614,41 @@ void Mundo::morrer(Npc& n) {
         if (it != quando_muda_.end() && it->second <= tempo_ + EPS)
             evento_maca_vira_muda(i);
     }
-    n.causa_morte = (n.fome <= cfg::FOME_MINIMA ? 1 : 0) |
-                    (n.sede <= cfg::SEDE_MINIMA ? 2 : 0) |
-                    (temperatura() < cfg::TEMP_CRITICA ? 4 : 0);
+    n.causa_morte = causa_extra;
+    n.morreu_em = tempo_;
+    if (!n.bebe && n.dentro_abrigo < 0) {
+        n.causa_morte |= (n.fome <= cfg::FOME_MINIMA ? 1 : 0) |
+                         (n.sede <= cfg::SEDE_MINIMA ? 2 : 0) |
+                         (temperatura() < cfg::TEMP_CRITICA ? 4 : 0);
+    }
     n.estado = EstadoNpc::Morto;
     n.tem_alvo = false;
     n.comendo_da_mao = false;
-    ocupar(indice(n.pos), Ocupante::Corpo);
+    if (n.gravida) {
+        n.gravida = false;
+        registrar(TipoRegistro::BebePerdido, n.id);
+    }
+    if (n.parceiro >= 0) {
+        npcs_[n.parceiro].parceiro = -1;
+        npcs_[n.parceiro].procriando_desde = -1.0;
+        n.parceiro = -1;
+    }
+    n.procriando_desde = -1.0;
+    sair_de_morador(n);
+    bool tem_corpo = true;
+    if (n.dentro_abrigo >= 0) {
+        Abrigo& ab = abrigos_[n.dentro_abrigo];
+        ab.dentro.erase(std::find(ab.dentro.begin(), ab.dentro.end(), n.id));
+        n.dentro_abrigo = -1;
+        Pos fora;
+        tem_corpo = lugar_livre_perto(ab.pos, fora);
+        if (tem_corpo) n.pos = com_z(fora);
+    }
+    if (tem_corpo) ocupar(indice(n.pos), Ocupante::Corpo);
     while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, n.origem_carregada))
         n.macas_carregadas -= 1;
     n.origem_carregada = -1;
+    registrar(TipoRegistro::Morte, n.id, n.causa_morte);
 }
 
 // Põe uma maçã no chão na célula livre mais perto de `onde` (camada 1 =
@@ -1400,6 +1713,15 @@ bool Mundo::teste_mover(int id, int x, int y) {
     ocupar(indice(n.pos), Ocupante::Npc);
     n.tem_destino = false;
     return true;
+}
+
+// Só para testes: muda a idade (anos) e reagenda a velhice a partir dela.
+void Mundo::teste_idade(int id, double anos) {
+    Npc& n = npcs_[id];
+    n.idade_ref_anos = anos;
+    n.idade_ref_t = tempo_;
+    n.quando_velhice = tempo_ + (cfg::IDADE_MAXIMA_ANOS - anos) * cfg::SEGUNDOS_POR_ANO;
+    agendar(n.quando_velhice, VELHICE, id);
 }
 
 void Mundo::teste_definir(int x, int y, int z, Material m, int nivel_agua) {

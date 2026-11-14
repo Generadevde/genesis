@@ -89,7 +89,39 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("INDO_TRABALHAR", EstadoNpc::IndoTrabalhar)
         .value("TRABALHANDO", EstadoNpc::Trabalhando)
         .value("INDO_ABRIGO", EstadoNpc::IndoAbrigo)
-        .value("DORMINDO", EstadoNpc::Dormindo);
+        .value("DORMINDO", EstadoNpc::Dormindo)
+        .value("INDO_PROCRIAR", EstadoNpc::IndoProcriar)
+        .value("PROCRIANDO", EstadoNpc::Procriando)
+        .value("BEBE", EstadoNpc::Bebe);
+
+    py::enum_<Sexo>(m, "Sexo")
+        .value("HOMEM", Sexo::Homem)
+        .value("MULHER", Sexo::Mulher);
+
+    py::enum_<TipoRegistro>(m, "TipoRegistro")
+        .value("INICIO", TipoRegistro::Inicio)
+        .value("NASCIMENTO", TipoRegistro::Nascimento)
+        .value("MORTE", TipoRegistro::Morte)
+        .value("CASAL", TipoRegistro::Casal)
+        .value("GRAVIDEZ", TipoRegistro::Gravidez)
+        .value("VIROU_ADULTO", TipoRegistro::VirouAdulto)
+        .value("ABRIGO_FEITO", TipoRegistro::AbrigoFeito)
+        .value("MACHADO_FEITO", TipoRegistro::MachadoFeito)
+        .value("ARVORE_CORTADA", TipoRegistro::ArvoreCortada)
+        .value("MUDA_NASCEU", TipoRegistro::MudaNasceu)
+        .value("ARVORE_NASCEU", TipoRegistro::ArvoreNasceu)
+        .value("ARVORE_SECOU", TipoRegistro::ArvoreSecou)
+        .value("ARVORE_SUMIU", TipoRegistro::ArvoreSumiu)
+        .value("PEDRA_ESGOTOU", TipoRegistro::PedraEsgotou)
+        .value("BEBE_PERDIDO", TipoRegistro::BebePerdido);
+
+    py::class_<Registro>(m, "Registro")
+        .def_readonly("tempo", &Registro::tempo)
+        .def_readonly("tipo", &Registro::tipo)
+        .def_readonly("a", &Registro::a)
+        .def_readonly("b", &Registro::b)
+        .def_readonly("c", &Registro::c)
+        .def_readonly("pos", &Registro::pos);
 
     py::class_<Macieira>(m, "Macieira")
         .def_readonly("pos", &Macieira::pos)
@@ -108,6 +140,20 @@ PYBIND11_MODULE(genesis_motor, m) {
     py::class_<Npc>(m, "Npc")
         .def_readonly("id", &Npc::id)
         .def_readonly("nome", &Npc::nome)
+        .def_readonly("sexo", &Npc::sexo)
+        .def_readonly("bebe", &Npc::bebe)
+        .def_readonly("nasceu", &Npc::nasceu)
+        .def_readonly("mae", &Npc::mae)
+        .def_readonly("pai", &Npc::pai)
+        .def_readonly("filhos", &Npc::filhos)
+        .def_readonly("parceiro", &Npc::parceiro)
+        .def_readonly("gravida", &Npc::gravida)
+        .def_readonly("gravidez_pai", &Npc::gravidez_pai)
+        .def_readonly("quando_nascer", &Npc::quando_nascer)
+        .def_readonly("pode_engravidar_em", &Npc::pode_engravidar_em)
+        .def_readonly("procriando_desde", &Npc::procriando_desde)
+        .def_readonly("morreu_em", &Npc::morreu_em)
+        .def_readonly("quando_velhice", &Npc::quando_velhice)
         .def_readonly("macas_carregadas", &Npc::macas_carregadas)
         .def_readonly("comendo_da_mao", &Npc::comendo_da_mao)
         .def_readonly("lascas", &Npc::lascas)
@@ -142,10 +188,16 @@ PYBIND11_MODULE(genesis_motor, m) {
     m.attr("SEGUNDOS_POR_HORA") = config::SEGUNDOS_POR_HORA;
     m.attr("SEGUNDOS_POR_DIA") = config::SEGUNDOS_POR_DIA;
     m.attr("TEMP_CRITICA") = config::TEMP_CRITICA;
+    m.attr("HOMENS_PADRAO") = config::HOMENS_PADRAO;
+    m.attr("MULHERES_PADRAO") = config::MULHERES_PADRAO;
+    m.attr("SEGUNDOS_POR_ANO") = config::SEGUNDOS_POR_ANO;
+    m.attr("HORA_INICIAL") = config::HORA_INICIAL;
     m.attr("TEMP_FRIO") = config::TEMP_FRIO;
 
     py::class_<Mundo>(m, "Mundo")
-        .def(py::init<std::uint64_t>(), py::arg("semente"))
+        .def(py::init<std::uint64_t, int, int>(), py::arg("semente"),
+             py::arg("homens") = config::HOMENS_PADRAO,
+             py::arg("mulheres") = config::MULHERES_PADRAO)
         .def("avancar", &Mundo::avancar, py::arg("dt"),
              "Anda o tempo da simulação em dt segundos.")
         .def_property_readonly("largura", &Mundo::largura)
@@ -179,6 +231,14 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def("macas", &Mundo::macas)
         .def("mudas", &Mundo::mudas)
         .def("pedras", &Mundo::pedras)
+        .def("idade_anos", &Mundo::idade_anos, py::arg("npc"))
+        .def("total_historico", [](const Mundo& w) { return w.historico().size(); })
+        .def("historico", [](const Mundo& w, size_t desde) {
+            const auto& h = w.historico();
+            return std::vector<Registro>(h.begin() + static_cast<long>(std::min(desde, h.size())),
+                                         h.end());
+        }, py::arg("desde") = 0,
+           "Acontecimentos importantes a partir do número `desde`.")
         .def("abrigos", &Mundo::abrigos)
         .def("pedra_em", &Mundo::pedra_em, py::arg("x"), py::arg("y"))
         .def("abrigo_em", &Mundo::abrigo_em, py::arg("x"), py::arg("y"))
@@ -189,6 +249,8 @@ PYBIND11_MODULE(genesis_motor, m) {
              "SÓ PARA TESTES: dá itens ao NPC.")
         .def("teste_mover", &Mundo::teste_mover, py::arg("id"), py::arg("x"),
              py::arg("y"), "SÓ PARA TESTES: põe o NPC numa célula livre.")
+        .def("teste_idade", &Mundo::teste_idade, py::arg("id"), py::arg("anos"),
+             "SÓ PARA TESTES: muda a idade e reagenda a velhice.")
         .def("macieira_em", &Mundo::macieira_em, py::arg("x"), py::arg("y"))
         .def("muda_em", [](const Mundo& w, int x, int y) -> py::object {
             const Muda* u = w.muda_em(x, y);

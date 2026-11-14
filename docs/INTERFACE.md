@@ -115,6 +115,14 @@ confere isso.
 A cada quadro, o pygame mede quanto tempo passou e o motor anda exatamente
 isso (`mundo.avancar(dt)`). 60 quadros por segundo = taxa do monitor do dono.
 
+### Família e Histórico (motor 0.11)
+- **Arquivo → Nova simulação** abre a janela com **Homens** e **Mulheres**
+  (só números; Tab troca o campo, Enter = OK, Esc = Cancelar).
+- Pessoas: homem 🧍, mulher 🧍🏼‍♀️, bebê 👶 (metade do tamanho).
+- Aba **Histórico**: acontecimentos importantes, mais novo em cima; filtros
+  Pessoas / Trabalho / Plantas; rodinha rola. Detalhes em
+  [FAMILIA.md](FAMILIA.md).
+
 ## Valores PROVISÓRIOS (aguardando o dono do projeto)
 
 Estão em `interface/aparencia.py`:

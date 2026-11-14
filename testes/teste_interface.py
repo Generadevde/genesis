@@ -39,7 +39,7 @@ def main() -> None:
             g.tratar_evento(ev)
         g.mundo.avancar(1 / 60)
         # passa por abas, níveis, zoom e menu
-        g.abas.ativa = (passo // 40) % 3  # Mapa, NPCs, Info
+        g.abas.ativa = (passo // 40) % 4  # Mapa, NPCs, Histórico, Info
         g.z_vista = [4, 2, 0, -5, -11, 4][passo // 40]
         g.nivel_zoom = passo % len(P.ESCALAS)
         g.menu.aberto = 0 if passo % 30 == 0 else None
@@ -109,6 +109,40 @@ def main() -> None:
     assert abs(g.mundo.tempo - t0 - 4.0) < 1e-9
     g.velocidade = 1
     print("ok  velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x")
+
+    # --- Janela "Nova simulação": digita 4 homens e 2 mulheres, OK.
+    g.abrir_dialogo_nova()
+    g.desenhar()
+    campo_h, campo_m = g._dlg_campos["homens"], g._dlg_campos["mulheres"]
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=campo_h.center)
+    evento(pygame.KEYDOWN, key=pygame.K_BACKSPACE, unicode="")
+    evento(pygame.KEYDOWN, key=pygame.K_4, unicode="4")
+    evento(pygame.KEYDOWN, key=pygame.K_TAB, unicode="\t")
+    evento(pygame.KEYDOWN, key=pygame.K_BACKSPACE, unicode="")
+    evento(pygame.KEYDOWN, key=pygame.K_2, unicode="2")
+    evento(pygame.KEYDOWN, key=pygame.K_a, unicode="a")   # letra: ignorada
+    g.desenhar()
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=g._dlg_ok.center)
+    assert g.dialogo is None
+    sexos = [n.sexo for n in g.mundo.npcs()]
+    assert sexos.count(P.gm.Sexo.HOMEM) == 4 and sexos.count(P.gm.Sexo.MULHER) == 2
+    # Cancelar não muda nada
+    antes = g.mundo
+    g.abrir_dialogo_nova()
+    g.desenhar()
+    evento(pygame.KEYDOWN, key=pygame.K_ESCAPE, unicode="")
+    assert g.dialogo is None and g.mundo is antes
+    # Aba Histórico: desenha, filtra e rola
+    g.abas.ativa = g.abas.nomes.index("Histórico")
+    g.desenhar()
+    assert g.historico and g.historico[0][2].startswith("A simulação começou")
+    b, cat = g._botoes_filtro[0]
+    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=b.center)
+    assert g.filtros[cat] is False
+    evento(pygame.MOUSEWHEEL, x=0, y=-1)
+    g.desenhar()
+    print("ok  janela Nova simulação (4 homens, 2 mulheres; Esc cancela); "
+          "aba Histórico (filtro e rolagem)")
 
     g.nova_simulacao()
     g.desenhar()

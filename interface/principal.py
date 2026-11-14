@@ -54,6 +54,12 @@ SIMBOLO = {
     int(OC.PEDRA): "⬟",
     int(OC.ABRIGO): "🏠",
 }
+# Pessoas (pedido do dono do projeto): homem 🧍, mulher 🧍🏼‍♀️, bebê 👶
+# desenhado com metade do tamanho da célula.
+COD_HOMEM, COD_MULHER, COD_BEBE = 60, 61, 62
+SIMBOLO_PESSOA = {COD_HOMEM: "🧍", COD_MULHER: "🧍🏼‍♀️", COD_BEBE: "👶"}
+FRACAO_BEBE = 0.5  # o bebê ocupa metade da célula (pedido: "pode ser meio")
+
 # Símbolos que não existem na fonte do mapa: desenhados com a fonte da
 # interface (DejaVu Sans), que tem o ⬟.
 SIMBOLOS_FONTE_UI = {"⬟"}
@@ -81,7 +87,37 @@ NOME_ESTADO = {
     EST.TRABALHANDO: "trabalhando",
     EST.INDO_ABRIGO: "indo para o abrigo (frio)",
     EST.DORMINDO: "dormindo no abrigo",
+    EST.INDO_PROCRIAR: "indo ao abrigo com o par (procriar)",
+    EST.PROCRIANDO: "no abrigo com o par (procriar)",
+    EST.BEBE: "bebê",
 }
+
+SEXO = gm.Sexo
+REG = gm.TipoRegistro
+# Categorias do histórico (filtros da aba Histórico).
+CATEGORIA = {
+    REG.INICIO: "Pessoas", REG.NASCIMENTO: "Pessoas", REG.MORTE: "Pessoas",
+    REG.CASAL: "Pessoas", REG.GRAVIDEZ: "Pessoas", REG.VIROU_ADULTO: "Pessoas",
+    REG.BEBE_PERDIDO: "Pessoas",
+    REG.ABRIGO_FEITO: "Trabalho", REG.MACHADO_FEITO: "Trabalho",
+    REG.ARVORE_CORTADA: "Trabalho", REG.PEDRA_ESGOTOU: "Trabalho",
+    REG.MUDA_NASCEU: "Plantas", REG.ARVORE_NASCEU: "Plantas",
+    REG.ARVORE_SECOU: "Plantas", REG.ARVORE_SUMIU: "Plantas",
+}
+CATEGORIAS = ["Pessoas", "Trabalho", "Plantas"]
+
+
+def causas_morte(bits: int) -> str:
+    nomes = [c for b, c in ((1, "fome"), (2, "sede"), (4, "frio"), (8, "velhice")) if bits & b]
+    return " e ".join(nomes) if nomes else "?"
+
+
+def relogio_de(tempo: float) -> str:
+    """'Dia 2, 14:05' para um tempo da simulação (1 h = SEGUNDOS_POR_HORA s)."""
+    minutos = int(tempo / (gm.SEGUNDOS_POR_HORA / 60) + 1e-9) + gm.HORA_INICIAL * 60
+    dia, resto = divmod(minutos, 24 * 60)
+    return f"Dia {dia + 1}, {resto // 60:02d}:{resto % 60:02d}"
+
 
 TAREFA = gm.Tarefa
 NOME_TAREFA = {
@@ -117,6 +153,7 @@ PRIORIDADE = {
     int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
     int(OC.MACIEIRA_SECA): 6, int(OC.MUDA): 5.5,  # PROVISÓRIO
     int(OC.ABRIGO): 8.5, int(OC.PEDRA): 5.6,      # PROVISÓRIO
+    COD_HOMEM: 9, COD_MULHER: 9, COD_BEBE: 9,
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
     COD_MATERIAL + int(MAT.AREIA): 5,
     COD_MATERIAL + int(MAT.AGUA): 4,
@@ -228,15 +265,19 @@ class Genesis:
         # Menu "Arquivo" (pedido do dono do projeto).
         self.menu = win98.BarraMenu(self.fonte, [
             ("Arquivo", [
-                ("Nova simulação", self.nova_simulacao),
+                ("Nova simulação", self.abrir_dialogo_nova),
                 ("Exibir", self.exibir_informacoes),
                 None,
                 ("Sair", self.sair),
             ]),
         ])
-        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs", "Info"])
+        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs", "Histórico", "Info"])
 
         self.rodando = True
+        self.dialogo = None          # janela "Nova simulação" aberta
+        self.rolagem_npcs = 0        # primeira linha mostrada na tabela de NPCs
+        self.rolagem_hist = 0        # primeira linha mostrada no histórico
+        self.filtros = {c: True for c in CATEGORIAS}  # PROVISÓRIO: tudo ligado
         self._arraste = None  # clique-e-arraste do mapa em andamento
         self.velocidade = 1   # 1x = tempo real; 2x, 4x, 8x pelos botões
         self._botoes_velocidade = []  # (retângulo, multiplicador)
@@ -261,16 +302,81 @@ class Genesis:
     # ------------------------------------------------------------------
     # Ações do menu
     # ------------------------------------------------------------------
-    def nova_simulacao(self) -> None:
-        """Começa um mundo novo, com semente sorteada."""
+    def nova_simulacao(self, homens: int = gm.HOMENS_PADRAO,
+                       mulheres: int = gm.MULHERES_PADRAO) -> None:
+        """Começa um mundo novo, com semente sorteada e esses NPCs."""
         semente = int.from_bytes(os.urandom(8), "little")
-        self.mundo = gm.Mundo(semente)
+        self.mundo = gm.Mundo(semente, homens, mulheres)
+        self.historico = []   # acontecimentos já formatados (aba Histórico)
+        self.rolagem_npcs = self.rolagem_hist = 0
         self.L, self.H = self.mundo.largura, self.mundo.altura
         # Nível z que se está vendo. Começa no topo dos morros (+4), assim
         # a ilha inteira aparece vista de cima — PROVISÓRIO.
         self.z_vista = gm.SUPERFICIE_MAX
         self.cam_x = self.cam_y = None  # centraliza no próximo quadro
         self.selecao = None  # ("npc", id) ou ("celula", x, y, z)
+
+    # --- Janela "Nova simulação" -------------------------------------------
+    def abrir_dialogo_nova(self) -> None:
+        """Abre a janela com os campos de homens e mulheres."""
+        self.dialogo = {"homens": str(gm.HOMENS_PADRAO),
+                        "mulheres": str(gm.MULHERES_PADRAO), "foco": "homens"}
+
+    def desenhar_dialogo(self) -> None:
+        d = self.dialogo
+        alt = self.fonte.get_height() + 2 * A.ESPACO
+        largura = (self.fonte.size("Mulheres:")[0] + A.LARGURA_CAMPO_NUMERO
+                   + 8 * A.ESPACO)
+        altura = 5 * alt + 6 * A.ESPACO
+        tela_l, tela_a = self.tela.get_size()
+        r = pygame.Rect((tela_l - largura) // 2, (tela_a - altura) // 2, largura, altura)
+        self._dlg_fechar = win98.janela(self.tela, r, self.fonte_negrito, "Nova simulação")
+        x_rot = r.left + 2 * A.ESPACO
+        x_campo = x_rot + self.fonte.size("Mulheres:")[0] + 2 * A.ESPACO
+        y = r.top + alt + 2 * A.ESPACO
+        self._dlg_campos = {}
+        for chave, rotulo in (("homens", "Homens:"), ("mulheres", "Mulheres:")):
+            win98.escrever(self.tela, self.fonte, rotulo, (x_rot, y + A.ESPACO))
+            campo = pygame.Rect(x_campo, y, A.LARGURA_CAMPO_NUMERO, alt)
+            win98.caixa(self.tela, campo, saliente=False, cor=A.FUNDO_CAMPO)
+            texto = d[chave] + ("|" if d["foco"] == chave else "")  # cursor
+            win98.escrever(self.tela, self.fonte, texto, (campo.left + A.ESPACO, y + A.ESPACO))
+            self._dlg_campos[chave] = campo
+            y += alt + A.ESPACO
+        y += A.ESPACO
+        bw = self.fonte.size("Cancelar")[0] + 4 * A.ESPACO
+        self._dlg_ok = pygame.Rect(r.right - 2 * bw - 3 * A.ESPACO, y, bw, alt)
+        self._dlg_cancelar = pygame.Rect(r.right - bw - 2 * A.ESPACO, y, bw, alt)
+        win98.botao(self.tela, self._dlg_ok, self.fonte, "OK")
+        win98.botao(self.tela, self._dlg_cancelar, self.fonte, "Cancelar")
+
+    def confirmar_dialogo(self) -> None:
+        d = self.dialogo
+        self.dialogo = None
+        self.nova_simulacao(int(d["homens"] or 0), int(d["mulheres"] or 0))
+
+    def evento_dialogo(self, ev) -> None:
+        """Enquanto a janela está aberta, só ela recebe mouse e teclado."""
+        d = self.dialogo
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            for chave, campo in self._dlg_campos.items():
+                if campo.collidepoint(ev.pos):
+                    d["foco"] = chave
+            if self._dlg_ok.collidepoint(ev.pos):
+                self.confirmar_dialogo()
+            elif self._dlg_cancelar.collidepoint(ev.pos) or self._dlg_fechar.collidepoint(ev.pos):
+                self.dialogo = None
+        elif ev.type == pygame.KEYDOWN:
+            if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.confirmar_dialogo()
+            elif ev.key == pygame.K_ESCAPE:
+                self.dialogo = None
+            elif ev.key == pygame.K_TAB:
+                d["foco"] = "mulheres" if d["foco"] == "homens" else "homens"
+            elif ev.key == pygame.K_BACKSPACE:
+                d[d["foco"]] = d[d["foco"]][:-1]
+            elif ev.unicode.isdigit():  # só números (sem máximo)
+                d[d["foco"]] = (d[d["foco"]] + ev.unicode).lstrip("0") or "0"
 
     def exibir_informacoes(self) -> None:
         """'Exibir': mostra a tela com as informações (aba NPCs)."""
@@ -326,6 +432,12 @@ class Genesis:
                     melhor = (cod, (x, y))
         return melhor
 
+    @staticmethod
+    def codigo_pessoa(n) -> int:
+        if n.bebe:
+            return COD_BEBE
+        return COD_MULHER if n.sexo == SEXO.MULHER else COD_HOMEM
+
     def npc_em(self, x: int, y: int):
         for n in self.mundo.npcs():
             if n.pos.x == x and n.pos.y == y:
@@ -346,6 +458,9 @@ class Genesis:
 
         oc = self.mundo.ocupacao_bytes()
         vis = self.mundo.visao_bytes(self.z_vista)
+        # Quem está em cada célula (para desenhar homem / mulher / bebê).
+        pessoas = {(n.pos.x, n.pos.y): self.codigo_pessoa(n) for n in self.mundo.npcs()
+                   if n.estado != EST.MORTO and n.dentro_abrigo < 0}
         ox, oy = area.left + 2, area.top + 2
         anterior = self.tela.get_clip()
         self.tela.set_clip(area.inflate(-4, -4))
@@ -354,8 +469,11 @@ class Genesis:
                 if lado == 1:  # zoom normal/aproximado: célula direta
                     k = my * self.L + mx
                     cod = decodificar(vis[k], oc[k])
+                    onde = (mx, my)
                 else:
-                    cod, _ = self.codigo_bloco(vis, oc, mx, my, lado)
+                    cod, onde = self.codigo_bloco(vis, oc, mx, my, lado)
+                if cod == int(OC.NPC):
+                    cod = pessoas.get(onde, COD_HOMEM)
                 img = self.imagem(cod, cel)
                 if img is None:
                     continue
@@ -415,6 +533,9 @@ class Genesis:
 
     def imagem(self, cod: int, lado: int):
         """Desenho de um código (ocupante ou material) no tamanho `lado`."""
+        if cod in SIMBOLO_PESSOA:
+            tam = max(1, int(lado * FRACAO_BEBE)) if cod == COD_BEBE else lado
+            return self.simbolos.get(SIMBOLO_PESSOA[cod], tam)
         if cod >= COD_MATERIAL:
             simb, cor, _ = MATERIAL[cod - COD_MATERIAL]
             if simb == " ":
@@ -425,21 +546,105 @@ class Genesis:
         return self.simbolos.get(SIMBOLO[cod], lado, cor,
                                  cinza=(cod == int(OC.MACIEIRA_SECA)))
 
+    def texto_idade(self, n) -> str:
+        if n.bebe:
+            return "bebê, " + duracao(self.mundo.tempo - n.nasceu)
+        return f"{int(self.mundo.idade_anos(n))} anos"
+
+    def nome_de(self, i: int) -> str:
+        return self.mundo.npcs()[i].nome if i >= 0 else "—"
+
     def linhas_tabela(self):
-        return [[n.nome, f"{n.hp:.0f}", f"{n.fome:.0f}", f"{n.sede:.0f}",
+        return [[n.nome, "homem" if n.sexo == SEXO.HOMEM else "mulher",
+                 self.texto_idade(n), f"{n.hp:.0f}", f"{n.fome:.0f}", f"{n.sede:.0f}",
                  self.texto_estado(n), f"({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
-                 self.texto_carregando(n),
-                 str(len(n.macieiras_lembradas)), str(len(n.aguas_lembradas))]
+                 self.texto_carregando(n), self.nome_de(n.parceiro)]
                 for n in self.mundo.npcs()]
 
     def desenhar_npcs(self, area: pygame.Rect) -> None:
         pygame.draw.rect(self.tela, A.CINZA, area)
         sel = self.selecao[1] if self.selecao and self.selecao[0] == "npc" else None
+        campo = area.inflate(-2 * A.ESPACO, -2 * A.ESPACO)
+        linhas = self.linhas_tabela()
+        cabem = win98.linhas_visiveis(campo, self.fonte)
+        self.rolagem_npcs = max(0, min(self.rolagem_npcs, len(linhas) - cabem))
         self._linhas_rects = win98.tabela(
-            self.tela, area.inflate(-2 * A.ESPACO, -2 * A.ESPACO), self.fonte,
-            ["NPC", "HP", "Fome", "Sede", "Estado", "Posição", "Carregando",
-             "Macieiras lembradas", "Águas lembradas"],
-            self.linhas_tabela(), selecionada=sel)
+            self.tela, campo, self.fonte,
+            ["NPC", "Sexo", "Idade", "HP", "Fome", "Sede", "Estado", "Posição",
+             "Carregando", "Par"],
+            linhas, selecionada=sel, inicio=self.rolagem_npcs)
+
+    # --- Histórico --------------------------------------------------------
+    def texto_registro(self, r) -> str:
+        nome = self.nome_de
+        p = f"({r.pos.x}, {r.pos.y})"
+        t = r.tipo
+        if t == REG.INICIO:
+            return f"A simulação começou: {r.a} homens e {r.b} mulheres"
+        if t == REG.NASCIMENTO:
+            f = self.mundo.npcs()[r.a]
+            sexo = "menino" if f.sexo == SEXO.HOMEM else "menina"
+            return f"Nasceu {f.nome} ({sexo}) — mãe {nome(r.b)}, pai {nome(r.c)}"
+        if t == REG.MORTE:
+            return f"{nome(r.a)} morreu ({causas_morte(r.b)})"
+        if t == REG.CASAL:
+            return f"{nome(r.a)} e {nome(r.b)} formaram um casal"
+        if t == REG.GRAVIDEZ:
+            return f"{nome(r.a)} engravidou (pai {nome(r.b)})"
+        if t == REG.VIROU_ADULTO:
+            return f"{nome(r.a)} virou adulto"
+        if t == REG.BEBE_PERDIDO:
+            return f"{nome(r.a)} morreu grávida; o bebê também"
+        if t == REG.ABRIGO_FEITO:
+            return f"{nome(r.a)} construiu um abrigo em {p}"
+        if t == REG.MACHADO_FEITO:
+            return f"{nome(r.a)} fez um machado primitivo"
+        if t == REG.ARVORE_CORTADA:
+            return f"{nome(r.a)} cortou uma árvore em {p}"
+        if t == REG.PEDRA_ESGOTOU:
+            return f"A pedra em {p} esgotou e sumiu"
+        if t == REG.MUDA_NASCEU:
+            return f"Uma maçã esquecida virou muda em {p}"
+        if t == REG.ARVORE_NASCEU:
+            return f"Uma muda virou macieira em {p}"
+        if t == REG.ARVORE_SECOU:
+            return f"A macieira em {p} secou"
+        if t == REG.ARVORE_SUMIU:
+            return f"A macieira seca em {p} sumiu"
+        return str(t)
+
+    def atualizar_historico(self) -> None:
+        """Busca no motor só os acontecimentos novos e guarda já formatados."""
+        if self.mundo.total_historico() == len(self.historico):
+            return
+        for r in self.mundo.historico(len(self.historico)):
+            self.historico.append((CATEGORIA.get(r.tipo, "Pessoas"),
+                                   relogio_de(r.tempo), self.texto_registro(r)))
+
+    def desenhar_historico(self, area: pygame.Rect) -> None:
+        pygame.draw.rect(self.tela, A.CINZA, area)
+        # Filtros: um botão por categoria (afundado = mostrando).
+        x, y = area.left + A.ESPACO, area.top + A.ESPACO
+        alt = self.fonte.get_height() + 2 * A.ESPACO
+        win98.escrever(self.tela, self.fonte, "Mostrar:", (x, y + A.ESPACO))
+        x += self.fonte.size("Mostrar:")[0] + 2 * A.ESPACO
+        self._botoes_filtro = []
+        for cat in CATEGORIAS:
+            w = self.fonte.size(cat)[0] + 4 * A.ESPACO
+            b = pygame.Rect(x, y, w, alt)
+            win98.botao(self.tela, b, self.fonte, cat, apertado=self.filtros[cat])
+            self._botoes_filtro.append((b, cat))
+            x += w + A.ESPACO
+        campo = pygame.Rect(area.left + A.ESPACO, y + alt + A.ESPACO,
+                            area.width - 2 * A.ESPACO,
+                            area.bottom - (y + alt + 2 * A.ESPACO))
+        # Mais novo primeiro.
+        itens = [h for h in reversed(self.historico) if self.filtros[h[0]]]
+        linhas = [[quando, cat, texto] for cat, quando, texto in itens]
+        cabem = win98.linhas_visiveis(campo, self.fonte)
+        self.rolagem_hist = max(0, min(self.rolagem_hist, len(linhas) - cabem))
+        win98.tabela(self.tela, campo, self.fonte, ["Quando", "Tipo", "O que aconteceu"],
+                     linhas or [["", "", "(nada ainda)"]], inicio=self.rolagem_hist)
 
     def descrever_selecao(self):
         """Símbolo, cor e linhas de texto do que está selecionado."""
@@ -448,18 +653,23 @@ class Genesis:
         if self.selecao[0] == "npc":
             n = self.mundo.npcs()[self.selecao[1]]
             if n.estado == EST.MORTO:
-                causas = [c for bit, c in ((1, "fome"), (2, "sede"), (4, "frio"))
-                          if n.causa_morte & bit]
-                causa = " e ".join(causas) if causas else "?"
+                causa = causas_morte(n.causa_morte)
                 return "✝", A.PRETO, [f"Corpo de {n.nome}",
                                       f"Morreu (HP 0) de: {causa}",
                                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})"]
             linhas = [n.nome,
+                      f"Sexo: {'homem' if n.sexo == SEXO.HOMEM else 'mulher'}",
+                      f"Idade: {self.texto_idade(n)}",
+                      f"Mãe: {self.nome_de(n.mae)}   Pai: {self.nome_de(n.pai)}",
+                      f"Par: {self.nome_de(n.parceiro)}"
+                      + (f"   Filhos: {n.filhos}" if n.filhos else ""),
                       f"HP: {n.hp:.0f}",
                       f"Fome: {n.fome:.0f}",
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
                       f"Carregando: {self.texto_carregando(n)}",
+                      *([f"Grávida: nasce em {duracao(n.quando_nascer - self.mundo.tempo)}"]
+                        if n.gravida else []),
                       f"Trabalho: {self.texto_tarefa(n)}",
                       f"Abrigo: {self.texto_abrigo(n)}",
                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
@@ -473,7 +683,7 @@ class Genesis:
                 linhas.append(f"  água: {len(n.aguas_lembradas)} ponto(s)")
             if not n.macieiras_lembradas and not n.aguas_lembradas:
                 linhas.append("  (nenhum lugar ainda)")
-            return "🗿", A.PRETO, linhas
+            return SIMBOLO_PESSOA[self.codigo_pessoa(n)], A.PRETO, linhas
         _, x, y, z = self.selecao
         pos = f"Posição: ({x}, {y}, {z:+d})"
         # Árvore e maçã ficam na superfície.
@@ -654,7 +864,9 @@ class Genesis:
                 "+ / -  ou  rodinha do mouse — zoom (aproximar / afastar)",
                 "Z / X — descer / subir um nível",
                 "Clique (sem arrastar) — selecionar",
-                "I — trocar de aba (Mapa, NPCs, Info)",
+                "I — trocar de aba (Mapa, NPCs, Histórico, Info)",
+                "Rodinha nas abas NPCs e Histórico — rolar a lista",
+                "Arquivo → Nova simulação — escolher quantos homens e mulheres",
                 "Esc — fechar o menu",
                 ">  >>  >>>>  >>>>>>>>  (barra de baixo) — tempo 2x, 4x, 8x, 16x; "
                 "clicar de novo volta a 1x",
@@ -672,6 +884,7 @@ class Genesis:
             y += alt // 2
 
     def desenhar(self) -> None:
+        self.atualizar_historico()
         # Pega a superfície ATUAL da janela. Quando a janela é maximizada ou
         # muda de tamanho, o pygame troca a superfície por uma nova; desenhar
         # na antiga (já descartada) derruba o programa (falha de segmentação).
@@ -686,12 +899,16 @@ class Genesis:
             self.desenhar_mapa(conteudo)
         elif aba == "NPCs":
             self.desenhar_npcs(conteudo)
+        elif aba == "Histórico":
+            self.desenhar_historico(conteudo)
         else:
             self.desenhar_info(conteudo)
         self.abas.desenhar(self.tela, conteudo.left, abas_y)
         self.desenhar_painel(painel)
         self.desenhar_status(status)
         self.menu.desenhar_aberto(self.tela)  # por último: fica por cima
+        if self.dialogo is not None:
+            self.desenhar_dialogo()
         pygame.display.flip()
 
     # ------------------------------------------------------------------
@@ -764,10 +981,19 @@ class Genesis:
     def tratar_evento(self, ev) -> None:
         if ev.type == pygame.QUIT:
             self.sair()
-        elif ev.type == pygame.MOUSEWHEEL:
-            # Rodinha: para cima aproxima, para baixo afasta (como + e -).
-            if self.abas.nomes[self.abas.ativa] == "Mapa":
+            return
+        if self.dialogo is not None:
+            self.evento_dialogo(ev)
+            return
+        aba = self.abas.nomes[self.abas.ativa]
+        if ev.type == pygame.MOUSEWHEEL:
+            # Rodinha: no mapa, zoom (para cima aproxima); nas listas, rola.
+            if aba == "Mapa":
                 self.zoom(-1 if ev.y > 0 else +1)
+            elif aba == "NPCs":
+                self.rolagem_npcs = max(0, self.rolagem_npcs - ev.y * A.LINHAS_POR_RODINHA)
+            elif aba == "Histórico":
+                self.rolagem_hist = max(0, self.rolagem_hist - ev.y * A.LINHAS_POR_RODINHA)
         elif ev.type == pygame.MOUSEMOTION and self._arraste is not None:
             self.arrastar(ev.pos)
         elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
@@ -789,9 +1015,15 @@ class Genesis:
                 self._arraste = {"inicio": ev.pos, "cam": (self.cam_x, self.cam_y),
                                  "arrastou": False}
             else:
-                for i, r in enumerate(getattr(self, "_linhas_rects", [])):
-                    if r.collidepoint(ev.pos):
-                        self.selecao = ("npc", i)
+                if aba == "NPCs":
+                    for i, r in getattr(self, "_linhas_rects", []):
+                        if r.collidepoint(ev.pos):
+                            self.selecao = ("npc", i)
+                elif aba == "Histórico":
+                    for b, cat in getattr(self, "_botoes_filtro", []):
+                        if b.collidepoint(ev.pos):
+                            self.filtros[cat] = not self.filtros[cat]
+                            self.rolagem_hist = 0
         elif ev.type == pygame.KEYDOWN:
             passo = max(1, int(self.escala))  # 1 célula da tela
             if ev.key == pygame.K_ESCAPE:

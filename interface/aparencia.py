@@ -60,6 +60,8 @@ TAM_CELULA = 24            # PROVISÓRIO: lado de 1 célula do mapa, em pixels (
 LARGURA_PAINEL = 280       # PROVISÓRIO: painel da direita (seleção)
 TAM_SIMBOLO_GRANDE = 128   # PROVISÓRIO: símbolo grande no painel da direita
 ESPACO = 6                 # PROVISÓRIO: folga interna de barras, abas e células da tabela
+LINHAS_POR_RODINHA = 3     # PROVISÓRIO: linhas que a rodinha rola nas listas (tabela, histórico)
+LARGURA_CAMPO_NUMERO = 120 # PROVISÓRIO: largura dos campos de número da janela Nova simulação
 # Segurar uma seta: espera antes de repetir e intervalo entre repetições (ms).
 REPETIR_TECLA_ESPERA_MS = 300     # PROVISÓRIO
 REPETIR_TECLA_INTERVALO_MS = 50   # PROVISÓRIO

@@ -183,20 +183,21 @@ class Abas:
 # Tabela
 # ---------------------------------------------------------------------------
 def tabela(tela: pygame.Surface, r: pygame.Rect, fonte: pygame.font.Font,
-           colunas, linhas, selecionada=None):
+           colunas, linhas, selecionada=None, inicio: int = 0):
     """Desenha uma tabela num campo branco afundado.
 
-    `colunas`: nomes; `linhas`: lista de listas de texto.
-    Devolve os retângulos de cada linha (para saber em qual clicaram).
+    `colunas`: nomes; `linhas`: lista de listas de texto. `inicio`: primeira
+    linha mostrada (para rolar). Devolve [(índice da linha, retângulo)] das
+    linhas que aparecem (para saber em qual clicaram).
     """
     caixa(tela, r, saliente=False, cor=A.FUNDO_CAMPO)
     alt = fonte.get_height() + A.ESPACO
-    # Largura de cada coluna: o maior texto dela.
     larguras = []
     for c, nome in enumerate(colunas):
         maior = max([fonte.size(nome)[0]] + [fonte.size(l[c])[0] for l in linhas])
         larguras.append(maior + 4 * A.ESPACO)
-    # Cabeçalho: botões salientes, como no Windows 98.
+    anterior = tela.get_clip()
+    tela.set_clip(r.inflate(-4, -4))
     x = r.left + 2
     y = r.top + 2
     for nome, w in zip(colunas, larguras):
@@ -204,10 +205,12 @@ def tabela(tela: pygame.Surface, r: pygame.Rect, fonte: pygame.font.Font,
         caixa(tela, cab)
         escrever(tela, fonte, nome, (cab.left + 2 * A.ESPACO, cab.top + A.ESPACO // 2))
         x += w
-    # Linhas
     rects = []
     y += alt
-    for i, linha in enumerate(linhas):
+    for i in range(max(0, inicio), len(linhas)):
+        if y + alt > r.bottom:
+            break
+        linha = linhas[i]
         lr = pygame.Rect(r.left + 2, y, sum(larguras), alt)
         cor = A.TEXTO
         if i == selecionada:
@@ -217,6 +220,37 @@ def tabela(tela: pygame.Surface, r: pygame.Rect, fonte: pygame.font.Font,
         for texto, w in zip(linha, larguras):
             escrever(tela, fonte, texto, (x + 2 * A.ESPACO, y + A.ESPACO // 2), cor)
             x += w
-        rects.append(lr)
+        rects.append((i, lr))
         y += alt
+    tela.set_clip(anterior)
     return rects
+
+
+def linhas_visiveis(r: pygame.Rect, fonte: pygame.font.Font, cabecalho: bool = True) -> int:
+    """Quantas linhas de texto cabem no campo `r` (descontando o cabeçalho)."""
+    alt = fonte.get_height() + A.ESPACO
+    return max(1, (r.height - 4) // alt - (1 if cabecalho else 0))
+
+
+def botao(tela: pygame.Surface, r: pygame.Rect, fonte: pygame.font.Font, texto: str,
+          apertado: bool = False) -> None:
+    """Botão do Windows 98: saliente; apertado = afundado."""
+    caixa(tela, r, saliente=not apertado)
+    w, h = fonte.size(texto)
+    d = 1 if apertado else 0
+    escrever(tela, fonte, texto, (r.centerx - w // 2 + d, r.centery - h // 2 + d))
+
+
+def janela(tela: pygame.Surface, r: pygame.Rect, fonte_titulo: pygame.font.Font,
+           titulo: str) -> pygame.Rect:
+    """Janela do Windows 98 (caixa cinza com barra de título azul-marinho).
+    Devolve o retângulo do botão [X] da barra de título."""
+    caixa(tela, r)
+    alt = fonte_titulo.get_height() + A.ESPACO
+    barra = pygame.Rect(r.left + 3, r.top + 3, r.width - 6, alt)
+    pygame.draw.rect(tela, A.AZUL_MARINHO, barra)
+    escrever(tela, fonte_titulo, titulo, (barra.left + A.ESPACO, barra.top + A.ESPACO // 2),
+             A.TEXTO_SELECIONADO)
+    x = pygame.Rect(barra.right - alt + 2, barra.top + 2, alt - 4, alt - 4)
+    botao(tela, x, fonte_titulo, "x")
+    return x

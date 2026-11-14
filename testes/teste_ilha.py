@@ -111,11 +111,23 @@ def teste_mapa():
 
 
 def teste_inicio():
+    """Começo: 3 homens e 3 mulheres (padrão), "NPC 1".."NPC 6", 20 anos,
+    fome e sede 100; 6 macieiras; nenhuma maçã. Outro número: o pedido."""
     w = gm.Mundo(2)
-    assert len(w.npcs()) == 4 and len(w.macieiras()) == 6
-    assert all(n.fome == 100 and n.sede == 100 for n in w.npcs())
-    assert len(w.macas()) == 0
-    print("ok  4 NPCs com fome 100 e sede 100, 6 macieiras, nenhuma maçã")
+    npcs = w.npcs()
+    assert [n.nome for n in npcs] == [f"NPC {i}" for i in range(1, 7)]
+    sexos = [n.sexo for n in npcs]
+    assert sexos.count(gm.Sexo.HOMEM) == 3 and sexos.count(gm.Sexo.MULHER) == 3
+    assert all(n.fome == 100 and n.sede == 100 and not n.bebe for n in npcs)
+    assert all(abs(w.idade_anos(n) - 20) < 1e-9 for n in npcs)
+    assert len(w.macieiras()) == 6 and len(w.macas()) == 0
+    w2 = gm.Mundo(3, 2, 5)
+    sx = [n.sexo for n in w2.npcs()]
+    assert len(sx) == 7 and sx.count(gm.Sexo.HOMEM) == 2
+    # sexo sorteado: em várias sementes, o NPC 1 não é sempre do mesmo sexo
+    assert len({gm.Mundo(s).npcs()[0].sexo for s in range(20)}) == 2
+    print("ok  começo: 3 homens e 3 mulheres sorteados (NPC 1..6), 20 anos, "
+          "fome e sede 100; outros números também; 6 macieiras")
 
 
 def teste_quedas():
@@ -250,7 +262,8 @@ def teste_geral(sementes=50, duracao=3600):
             w.avancar(1.0)
             npcs = w.npcs()
             oc = w.ocupacao_bytes()
-            vivos_ = [n for n in npcs if n.estado != E.MORTO]
+            # (quem está dentro de um abrigo não ocupa célula: o abrigo ocupa)
+            vivos_ = [n for n in npcs if n.estado != E.MORTO and n.dentro_abrigo < 0]
             mortos = [n for n in npcs if n.estado == E.MORTO]
             assert oc.count(int(O.NPC)) == len(vivos_)
             assert oc.count(int(O.CORPO)) == len(mortos)
@@ -285,7 +298,7 @@ def teste_geral(sementes=50, duracao=3600):
         comeu += len(ids_comeram)
         bebeu += len(ids_beberam)
         vivos += sum(n.estado != E.MORTO for n in w.npcs())
-    total = sementes * 4
+    total = sementes * len(w.npcs())
     print(f"ok  física/limites em {sementes} ilhas x {duracao} s — de {total} "
           f"NPCs: {comeu} comeram, {bebeu} beberam, {vivos} vivos no fim")
 
@@ -407,7 +420,7 @@ def teste_carregar(sementes=60, duracao=1800):
     """Nomes; pegar maçã sem fome; carrega no máximo 1; com fome come a da
     mão; lembra a macieira ao pegar; morrendo, a maçã cai ao lado."""
     w = gm.Mundo(1)
-    assert [n.nome for n in w.npcs()] == ["Jhon", "Elton", "Rose", "Sycilia"]
+    assert [n.nome for n in w.npcs()][:6] == [f"NPC {i}" for i in range(1, 7)]
     pegou = comeu_da_mao = soltou = 0
     for s in range(sementes):
         w = gm.Mundo(40000 + s)
@@ -443,7 +456,7 @@ def teste_carregar(sementes=60, duracao=1800):
                                list(n.macieiras_lembradas))
             chao_antes = chao
     assert pegou > 0 and comeu_da_mao > 0
-    print(f"ok  nomes Jhon/Elton/Rose/Sycilia; pegar e carregar (máx. 1): "
+    print(f"ok  pegar e carregar (máx. 1): "
           f"{pegou} pegadas, {comeu_da_mao} comidas da mão, "
           f"{soltou} soltas ao morrer")
 
@@ -601,9 +614,13 @@ def teste_trabalho(sementes=(11, 12, 13, 14), dt=0.5):
                     fim = "cortar"
                 elif t0 == T.CONSTRUIR and n.lenha < w0:
                     assert w0 - n.lenha == 20
-                    a = w.abrigos()[n.abrigo_casa]
+                    # O abrigo novo é o último da lista. No mesmo passo ele
+                    # pode ter virado casal e ido morar no abrigo do par.
+                    a = w.abrigos()[-1]
                     assert w.ocupante(a.pos.x, a.pos.y) == O.ABRIGO
-                    assert n.id in a.moradores
+                    assert n.abrigo_casa >= 0
+                    assert n.id in w.abrigos()[n.abrigo_casa].moradores
+                    assert n.abrigo_casa == len(w.abrigos()) - 1 or n.parceiro >= 0
                     fim = "abrigo"
                 if fim and n.id in inicio:
                     dur = w.tempo - inicio.pop(n.id)
@@ -693,6 +710,115 @@ def teste_noite_no_abrigo():
           "trabalho parado pela fome guarda o progresso e é retomado")
 
 
+def _proteger(w):
+    """Só no teste: mantém fome/sede cheias e, às 21:00, põe cada morador ao
+    lado do abrigo dele (senão, com as regras de hoje, morrem de frio)."""
+    _alimentar(w)
+    if w.relogio().hora != 21:
+        return
+    for n in w.npcs():
+        if n.estado == E.MORTO or n.bebe or n.abrigo_casa < 0 or n.dentro_abrigo >= 0:
+            continue
+        a = w.abrigos()[n.abrigo_casa]
+        if max(abs(n.pos.x - a.pos.x), abs(n.pos.y - a.pos.y)) <= 1:
+            continue
+        feito = False
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if not feito and (dx or dy):
+                    feito = w.teste_mover(n.id, a.pos.x + dx, a.pos.y + dy)
+
+
+def teste_familia(sementes=(13, 14, 15), dias=32):
+    """Casal, procriação (1 h no abrigo), gravidez (3 dias), nascimento ao
+    lado da mãe, nome pela mãe, bebê parado, adulto aos 10 dias (20 anos),
+    intervalo de 7 dias entre filhos."""
+    R = gm.TipoRegistro
+    H, DIA = gm.SEGUNDOS_POR_HORA, gm.SEGUNDOS_POR_DIA
+    contagem = {"casais": 0, "gravidezes": 0, "nascimentos": 0, "adultos": 0}
+    for sem in sementes:
+        w = gm.Mundo(sem)
+        pos_bebe = {}
+        while w.tempo < dias * DIA:
+            antes = {n.id: (n.gravida, n.dentro_abrigo) for n in w.npcs()}
+            _proteger(w)
+            w.avancar(1.0)
+            for n in w.npcs():
+                if n.parceiro >= 0:
+                    p = w.npcs()[n.parceiro]
+                    assert p.parceiro == n.id and p.sexo != n.sexo
+                    assert not n.bebe and not p.bebe
+                    if n.abrigo_casa >= 0 and p.abrigo_casa >= 0:
+                        # Dormem juntos — a não ser que os dois abrigos estejam
+                        # cheios: aí esperam vagar (decisão do usuário).
+                        ab = w.abrigos()
+                        assert (n.abrigo_casa == p.abrigo_casa
+                                or (len(ab[n.abrigo_casa].moradores) >= 2
+                                    and len(ab[p.abrigo_casa].moradores) >= 2))
+                g0, d0 = antes.get(n.id, (False, -1))
+                if n.gravida and not g0:  # engravidou agora: os dois juntos lá dentro
+                    pai = w.npcs()[n.gravidez_pai]
+                    assert n.dentro_abrigo >= 0 and pai.dentro_abrigo == n.dentro_abrigo
+                if n.bebe:
+                    xy = (n.pos.x, n.pos.y)
+                    assert pos_bebe.setdefault(n.id, xy) == xy  # bebê não anda
+        hist = w.historico()
+        gravidez = {}
+        ultimo_parto = {}
+        for r in hist:
+            if r.tipo == R.CASAL:
+                contagem["casais"] += 1
+                h, m = w.npcs()[r.a], w.npcs()[r.b]
+                assert h.sexo == gm.Sexo.HOMEM and m.sexo == gm.Sexo.MULHER
+            elif r.tipo == R.GRAVIDEZ:
+                contagem["gravidezes"] += 1
+                gravidez[r.a] = r.tempo
+                if r.a in ultimo_parto:
+                    assert r.tempo - ultimo_parto[r.a] >= 7 * DIA - 1e-6
+            elif r.tipo == R.NASCIMENTO:
+                contagem["nascimentos"] += 1
+                filho, mae = w.npcs()[r.a], w.npcs()[r.b]
+                assert abs(r.tempo - gravidez.pop(r.b) - 3 * DIA) < 1e-6
+                ultimo_parto[r.b] = r.tempo
+                k = sum(1 for x in w.npcs() if x.mae == mae.id and x.id <= filho.id)
+                esperado = ("F." if k == 1 else f"{k}F.") + mae.nome
+                assert filho.nome == esperado, (filho.nome, esperado)
+                assert filho.mae == mae.id and filho.pai == r.c
+            elif r.tipo == R.VIROU_ADULTO:
+                contagem["adultos"] += 1
+                n = w.npcs()[r.a]
+                assert abs(r.tempo - n.nasceu - 10 * DIA) < 1e-6
+                assert not n.bebe
+        for n in w.npcs():
+            if not n.bebe and n.mae >= 0 and n.estado != E.MORTO:
+                # virou adulto com 20 anos e segue envelhecendo
+                assert w.idade_anos(n) >= 20
+    assert all(contagem.values()), contagem
+    print(f"ok  família: casal homem+mulher, mesmo abrigo; engravida só com os "
+          f"dois no abrigo; nasce em 3 dias ao lado da mãe com nome F./2F.+mãe; "
+          f"bebê parado; adulto aos 10 dias (20 anos); 7 dias entre filhos — "
+          f"{contagem}")
+
+
+def teste_velhice():
+    """Aos 60 anos (1 ano = 14 dias) morre de velhice."""
+    w = gm.Mundo(5)
+    assert abs(w.npcs()[0].quando_velhice - 40 * 14 * gm.SEGUNDOS_POR_DIA) < 1e-6
+    w.teste_idade(0, 59.99)
+    falta = 0.01 * gm.SEGUNDOS_POR_ANO
+    while w.tempo < falta - 1.01:      # mantém alimentado até quase lá
+        w.teste_npc(0, 100, 100, 100)
+        w.avancar(1.0)
+    w.teste_npc(0, 100, 100, 100)
+    w.avancar(falta - 0.01 - w.tempo)
+    assert w.npcs()[0].estado != E.MORTO
+    w.avancar(0.02)
+    n = w.npcs()[0]
+    assert n.estado == E.MORTO and n.causa_morte == 8
+    assert abs(w.idade_anos(n) - 60) < 1e-6
+    print("ok  velhice: morre aos 60 anos (1 ano = 14 dias), causa 'velhice'")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_relogio()
@@ -707,6 +833,8 @@ if __name__ == "__main__":
     teste_explorar()
     teste_trabalho()
     teste_noite_no_abrigo()
+    teste_familia()
+    teste_velhice()
     teste_vegetal()
     teste_relevo_npc()
     teste_agua()

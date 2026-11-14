@@ -15,4 +15,5 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Explorar: [docs/EXPLORAR.md](docs/EXPLORAR.md)
 - HP, urgência, dia/noite e temperatura: [docs/HP_TEMPERATURA.md](docs/HP_TEMPERATURA.md)
 - Pedra, ferramentas, lenha e abrigo: [docs/ABRIGO.md](docs/ABRIGO.md)
+- Família (sexos, casais, filhos, idade) e aba Histórico: [docs/FAMILIA.md](docs/FAMILIA.md)
 - Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

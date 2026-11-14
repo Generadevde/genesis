@@ -26,6 +26,23 @@ inline constexpr double SEGUNDOS_POR_DIA = SEGUNDOS_POR_HORA * HORAS_POR_DIA;
 // (Era 00:00; mudado porque à 00:00 já faz frio crítico.)
 inline constexpr int HORA_INICIAL = 6;
 
+// 1 ano do jogo = 14 dias do jogo (pedido em 14/11/2026).
+inline constexpr double DIAS_POR_ANO = 14.0;
+inline constexpr double SEGUNDOS_POR_ANO = SEGUNDOS_POR_DIA * DIAS_POR_ANO;
+
+// --- Família (pedido em 14/11/2026) ------------------------------------------
+// Os NPCs iniciais começam com 20 anos; morrem de velhice aos 60 anos.
+inline constexpr double IDADE_INICIAL_ANOS = 20.0;
+inline constexpr double IDADE_MAXIMA_ANOS = 60.0;
+// Procriar: o casal fica 1 hora junto no abrigo; sempre dá certo.
+inline constexpr double PROCRIAR_H = 1.0;
+// Gravidez: 3 dias. Depois de nascer, a mãe só pode ter outro em 7 dias.
+inline constexpr double GRAVIDEZ_DIAS = 3.0;
+inline constexpr double INTERVALO_FILHOS_DIAS = 7.0;
+// O bebê vira adulto com 10 dias de vida e "salta" para 20 anos.
+inline constexpr double BEBE_VIRA_ADULTO_DIAS = 10.0;
+inline constexpr double IDADE_AO_VIRAR_ADULTO = 20.0;
+
 // --- Dia, noite e temperatura (pedido em 14/11/2026) ----------------------
 // Dia das 06:00 às 18:00; o resto é noite.
 inline constexpr double DIA_COMECA_H = 6.0;
@@ -87,10 +104,12 @@ inline constexpr int AGUA_NIVEL_MAX = 10;
 inline constexpr double AGUA_INTERVALO_S = 3.0;
 
 // --- Quantidades iniciais -------------------------------------------------
-inline constexpr int NUM_NPCS      = 4;
-// Nomes dos NPCs, na ordem (pedido em 14/11/2026; "por enquanto").
-inline constexpr const char* NOMES_NPC[NUM_NPCS] = {"Jhon", "Elton", "Rose",
-                                                    "Sycilia"};
+// NPCs iniciais (pedido em 14/11/2026): o jogador escolhe quantos homens
+// e quantas mulheres em Arquivo -> Nova simulação (sem máximo). Ao abrir o
+// programa direto, começa com 3 homens e 3 mulheres. Nomes: "NPC 1",
+// "NPC 2"...; o sexo de cada número é sorteado.
+inline constexpr int HOMENS_PADRAO = 3;
+inline constexpr int MULHERES_PADRAO = 3;
 // Quantas maçãs um NPC consegue carregar.
 inline constexpr int MACAS_CARREGAVEIS = 1;
 inline constexpr int NUM_MACIEIRAS = 6;

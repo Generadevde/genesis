@@ -74,7 +74,38 @@ enum class EstadoNpc : std::uint8_t {
     IndoTrabalhar, // indo até a pedra / árvore / lugar da obra
     Trabalhando,   // tirando lascas, tirando galhos, cortando ou construindo
     IndoAbrigo,    // com frio: indo para o abrigo dele
-    Dormindo       // dentro do abrigo, à noite
+    Dormindo,      // dentro do abrigo, à noite
+    IndoProcriar,  // indo para o abrigo do casal, para procriar
+    Procriando,    // dentro do abrigo do casal (esperando o parceiro ou junto)
+    Bebe           // bebê: fica parado, sem necessidades (por enquanto)
+};
+
+enum class Sexo : std::uint8_t { Homem = 0, Mulher = 1 };
+
+// Histórico do mundo: só os acontecimentos importantes.
+enum class TipoRegistro : std::uint8_t {
+    Inicio = 0,     // a = homens, b = mulheres
+    Nascimento,     // a = filho, b = mãe, c = pai
+    Morte,          // a = NPC, b = causa (1 fome, 2 sede, 4 frio, 8 velhice)
+    Casal,          // a = homem, b = mulher
+    Gravidez,       // a = mãe, b = pai
+    VirouAdulto,    // a = NPC
+    AbrigoFeito,    // a = NPC, pos
+    MachadoFeito,   // a = NPC
+    ArvoreCortada,  // a = NPC, pos
+    MudaNasceu,     // pos
+    ArvoreNasceu,   // pos (muda que virou macieira)
+    ArvoreSecou,    // pos
+    ArvoreSumiu,    // pos
+    PedraEsgotou,   // pos
+    BebePerdido     // a = mãe (morreu grávida)
+};
+
+struct Registro {
+    double tempo = 0.0;
+    TipoRegistro tipo = TipoRegistro::Inicio;
+    int a = -1, b = -1, c = -1;
+    Pos pos;
 };
 
 // O trabalho do NPC (para fazer o abrigo). Se ele para no meio (fome, sede,
@@ -117,6 +148,22 @@ struct Muda {
 struct Npc {
     int id = 0;
     std::string nome;
+    Sexo sexo = Sexo::Homem;
+    // --- Idade e família ---------------------------------------------------
+    bool bebe = false;
+    double nasceu = 0.0;           // quando nasceu (bebês) — tempo da simulação
+    double idade_ref_anos = 0.0;   // idade (anos) no instante idade_ref_t
+    double idade_ref_t = 0.0;      // (a idade anda a partir daí; 1 ano = 14 dias)
+    int mae = -1, pai = -1;
+    int filhos = 0;                // quantos filhos (para o nome: F., 2F., ...)
+    int parceiro = -1;             // o casal (-1 = sem par)
+    bool gravida = false;
+    int gravidez_pai = -1;
+    double quando_nascer = 0.0;
+    double pode_engravidar_em = 0.0;   // 7 dias depois do último parto
+    double procriando_desde = -1.0;    // casal junto no abrigo desde (-1 = não)
+    double morreu_em = -1.0;           // quando morreu (a idade para aí)
+    double quando_velhice = -1.0;      // quando chega aos 60 anos
     Pos pos;
     Pos anterior;              // de onde veio no último passo
     bool tem_anterior = false; // falso até dar o primeiro passo
@@ -170,7 +217,7 @@ class Mundo {
 public:
     // `semente` define o sorteio. A mesma semente gera sempre o mesmo mundo
     // (útil para testes). Sem semente, a interface sorteia uma.
-    explicit Mundo(std::uint64_t semente);
+    Mundo(std::uint64_t semente, int homens, int mulheres);
 
     // Anda o tempo da simulação em `dt` segundos.
     void avancar(double dt);
@@ -195,6 +242,8 @@ public:
     const Mapa3D& mapa() const { return mapa_; }
     const std::vector<Macieira>& macieiras() const { return macieiras_; }
     const std::vector<Pedra>& pedras() const { return pedras_; }
+    const std::vector<Registro>& historico() const { return historico_; }
+    double idade_anos(const Npc& n) const;   // bebê: fração de ano
     const std::vector<Abrigo>& abrigos() const { return abrigos_; }
     int pedra_em(int x, int y) const;
     int abrigo_em(int x, int y) const;
@@ -219,6 +268,7 @@ public:
     void teste_npc(int id, double fome, double sede, double hp);
     void teste_dar(int id, int lascas, int galhos, int lenha, bool machado);
     bool teste_mover(int id, int x, int y);
+    void teste_idade(int id, double anos);
     const std::vector<Npc>& npcs() const { return npcs_; }
 
 private:
@@ -259,6 +309,19 @@ private:
     bool tentar_pegar(Npc& n);
     // Abrigo e trabalho
     bool cadeia_abrigo(Npc& n);
+    // Família
+    void formar_casal(Npc& n);
+    void unir_abrigo_casal(Npc& a, Npc& b);
+    bool tentar_procriar(Npc& n);
+    bool quer_procriar(const Npc& n) const;
+    void ver_se_comeca_procriar(int abrigo);
+    void evento_concepcao(int mae);
+    void evento_nascimento(int mae);
+    void evento_adulto(int id);
+    void evento_velhice(int id);
+    void registrar(TipoRegistro t, int a = -1, int b = -1, int c = -1, Pos pos = {});
+    bool lugar_livre_perto(Pos centro, Pos& achado);
+    void sair_de_morador(Npc& n);
     bool trabalhar(Npc& n);
     bool escolher_tarefa(Npc& n);
     void evento_fim_trabalho(Npc& n);
@@ -290,7 +353,7 @@ private:
     bool ir_a_macieira_lembrada(Npc& n);
     bool ir_a_agua_lembrada(Npc& n);
     void mover(Npc& n, Pos destino);
-    void morrer(Npc& n);
+    void morrer(Npc& n, int causa_extra = 0);
     double sortear_queda();
 
     double tempo_ = 0.0;
@@ -307,6 +370,7 @@ private:
     std::map<int, Muda> mudas_;  // por id (ordem fixa)
     std::vector<Pedra> pedras_;   // nunca sai da lista (existe = false)
     std::vector<Abrigo> abrigos_;
+    std::vector<Registro> historico_;
     int proximo_id_muda_ = 0;
     int livres_terra_ = 0;  // células de terra sem nada em cima (ver ocupar)
     // Maçã no chão (célula) -> quando vira muda (6 horas depois de cair).
