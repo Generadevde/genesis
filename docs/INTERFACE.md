@@ -21,7 +21,8 @@ terminal (rich), que foi apagada.
   grande** e, embaixo, **o que ele é**.
 - Símbolos continuam os mesmos: 🗿 NPC, 🌳 macieira, 🍎 maçã, ✝ corpo,
   `"` grama (verde), `~` água (azul); desde o mundo 3D, também `d` terra
-  (marrom), `p` pedra (cinza) e `n` neve (branco).
+  (marrom), `p` pedra (cinza), `n` neve (branco), `a` areia (amarelo claro);
+  e as entidades ⬟ pedra (cinza escuro) e 🏠 abrigo.
 - **Mundo 3D**: a tela mostra **um nível z por vez**; onde o nível é ar,
   aparece o que está abaixo, **com a cor normal**. A barra de status mostra o nível. Clicar numa célula
   mostra o material, a posição (x, y, z) e, na água, o nível (ex.: 10/10).
@@ -55,7 +56,8 @@ terminal (rich), que foi apagada.
 | Trocar de aba | Clique na aba, ou tecla `I` (Mapa → NPCs → Info) |
 | Menu | Clique em Arquivo; `Esc` fecha |
 
-O painel de um NPC mostra o **nome**, o que ele está **carregando**
+O painel de um NPC mostra o **nome**, **HP**, o **trabalho** e o **abrigo**
+([ABRIGO.md](ABRIGO.md)), o que ele está **carregando**
 ([CARREGAR.md](CARREGAR.md)) e também a **memória** dele (macieiras lembradas e
 quantos pontos de água), e a aba NPCs tem as colunas "Macieiras lembradas"
 e "Águas lembradas" (ver [MEMORIA.md](MEMORIA.md)).

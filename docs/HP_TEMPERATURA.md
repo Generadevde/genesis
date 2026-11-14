@@ -52,5 +52,5 @@ Pedido pelo dono do projeto em 14/11/2026.
 crítico, somando; HP entre 0 e 100).
 
 ## Observado
-Sem abrigo, quem estiver vivo às ~21:20 (quando cai abaixo de 4°) perde
-5 HP/s e morre em 20 s. O abrigo vem nas próximas etapas.
+Sem abrigo, quem estiver vivo às ~21:42 (quando cai abaixo de 4°) perde
+5 HP/s e morre em 20 s. O abrigo: ver [ABRIGO.md](ABRIGO.md).

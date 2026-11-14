@@ -298,11 +298,12 @@ def teste_memoria(sementes=50, duracao=1800):
         w = gm.Mundo(20000 + s)
         arvores = [m.pos for m in w.macieiras()]
         antes = {n.id: (len(n.macieiras_lembradas), len(n.aguas_lembradas),
-                        n.estado, n.macas_carregadas) for n in w.npcs()}
+                        n.estado, n.macas_carregadas, n.galhos, n.machado)
+                 for n in w.npcs()}
         for _ in range(duracao):
             w.avancar(1.0)
             for n in w.npcs():
-                na, nag, est0, c0 = antes[n.id]
+                na, nag, est0, c0, g0, m0 = antes[n.id]
                 ml, al = n.macieiras_lembradas, n.aguas_lembradas
                 # Nunca esquece: as listas só crescem.
                 assert len(ml) >= na and len(al) >= nag
@@ -315,9 +316,10 @@ def teste_memoria(sementes=50, duracao=1800):
                 # Só aprende onde usou: macieira nova só depois de comer,
                 # água nova só depois de beber.
                 if len(ml) > na:
-                    # aprende ao terminar de comer (maçã do chão) ou ao pegar
-                    # uma maçã para carregar
-                    assert est0 == E.COMENDO or n.macas_carregadas > c0
+                    # aprende ao terminar de comer (maçã do chão), ao pegar
+                    # uma maçã para carregar, ou ao tirar galhos da árvore
+                    tirou_galho = n.galhos > g0 or (n.machado and not m0)
+                    assert est0 == E.COMENDO or n.macas_carregadas > c0 or tirou_galho
                 if len(al) > nag:
                     assert est0 == E.BEBENDO  # terminou de beber (pode já ter começado outro gole)
                 # Indo por memória: o alvo é um lugar lembrado.
@@ -328,7 +330,8 @@ def teste_memoria(sementes=50, duracao=1800):
                 if n.pela_memoria and n.estado == E.INDO_BEBER:
                     assert any(p.x == n.alvo.x and p.y == n.alvo.y for p in al)
                     viu_ida_agua += 1
-                antes[n.id] = (len(ml), len(al), n.estado, n.macas_carregadas)
+                antes[n.id] = (len(ml), len(al), n.estado, n.macas_carregadas,
+                               n.galhos, n.machado)
     # Com o relevo, quem bebe fica perto do mar e continua vendo a água;
     # por isso a ida à água lembrada pode não acontecer nestas ilhas.
     assert viu_ida_arvore > 0
@@ -554,6 +557,142 @@ def teste_explorar(sementes=20, duracao=300, dt=0.1):
           f"{aproximou} passos, todos aproximando do destino")
 
 
+def _alimentar(w):
+    """Mantém os NPCs vivos com fome/sede cheias (só para testar o trabalho)."""
+    for n in w.npcs():
+        if n.estado != E.MORTO and n.dentro_abrigo < 0:
+            w.teste_npc(n.id, 100, 100, max(n.hp, 1))
+
+
+def teste_trabalho(sementes=(11, 12, 13, 14), dt=0.5):
+    """Pedras, lascas, galhos, machado, corte, lenha e abrigo."""
+    T = gm.Tarefa
+    vistos = {"lascas": 0, "galhos": 0, "machado": 0, "cortar": 0, "abrigo": 0}
+    for sem in sementes:
+        w = gm.Mundo(sem)
+        pedras = w.pedras()
+        assert len(pedras) == 3 and all(p.lascas == 10 for p in pedras)
+        assert all(w.ocupante(p.pos.x, p.pos.y) == O.PEDRA for p in pedras)
+        inicio = {}
+        antes = {n.id: (n.lascas, n.galhos, n.lenha, n.machado, n.estado, n.tarefa)
+                 for n in w.npcs()}
+        arvores_antes = sum(m.existe for m in w.macieiras())
+        while w.tempo < 14 * 60:          # das 06:00 às 20:00 do dia 1
+            _alimentar(w)
+            w.avancar(dt)
+            for n in w.npcs():
+                l0, g0, w0, m0, e0, t0 = antes[n.id]
+                feito_machado = n.machado and not m0
+                if feito_machado:  # gastou 6 lascas + 2 galhos
+                    vistos["machado"] += 1
+                # O fim de cada trabalho aparece no que ele carrega; o
+                # próximo pode começar no mesmo instante (sem sair do estado).
+                ganhou_lascas = n.lascas + (6 if feito_machado else 0) - l0
+                ganhou_galhos = n.galhos + (2 if feito_machado else 0) - g0
+                fim = None
+                if t0 == T.LASCAS and ganhou_lascas > 0:
+                    assert ganhou_lascas in (1, 2), ganhou_lascas
+                    fim = "lascas"
+                elif t0 == T.GALHOS and ganhou_galhos > 0:
+                    assert ganhou_galhos == 1
+                    fim = "galhos"
+                elif t0 == T.CORTAR and n.lenha > w0:
+                    assert n.lenha - w0 == 30
+                    fim = "cortar"
+                elif t0 == T.CONSTRUIR and n.lenha < w0:
+                    assert w0 - n.lenha == 20
+                    a = w.abrigos()[n.abrigo_casa]
+                    assert w.ocupante(a.pos.x, a.pos.y) == O.ABRIGO
+                    assert n.id in a.moradores
+                    fim = "abrigo"
+                if fim and n.id in inicio:
+                    dur = w.tempo - inicio.pop(n.id)
+                    esperado = {"lascas": 30, "galhos": 30, "cortar": 30, "abrigo": 120}[fim]
+                    assert abs(dur - esperado) <= 1, (fim, dur)
+                    vistos[fim] += 1
+                if n.estado == E.TRABALHANDO and (e0 != E.TRABALHANDO or fim):
+                    inicio[n.id] = w.tempo - (0 if e0 != E.TRABALHANDO else 0)
+                if n.estado != E.TRABALHANDO and not fim:
+                    inicio.pop(n.id, None)
+                antes[n.id] = (n.lascas, n.galhos, n.lenha, n.machado, n.estado, n.tarefa)
+            for a in w.abrigos():
+                assert len(a.moradores) <= 2 and len(a.dentro) <= 2
+            for p in w.pedras():
+                if p.existe:
+                    assert w.ocupante(p.pos.x, p.pos.y) == O.PEDRA and p.lascas > 0
+    assert all(vistos.values()), vistos
+    print(f"ok  trabalho: lascas (30 s, +2), galhos (30 s, +1), machado "
+          f"(6 lascas + 2 galhos), corte (30 min, +30 lenha), abrigo (2 h, "
+          f"−20 lenha, até 2 moradores) — vistos {vistos}")
+
+
+def teste_noite_no_abrigo():
+    """Dentro do abrigo: dorme, sem frio/fome/sede, HP +1/s; sai às 06:00.
+    E: trabalho interrompido por fome guarda o progresso."""
+    T = gm.Tarefa
+    w = gm.Mundo(13)
+    # Dá 20 lenhas a todos: constroem logo onde estão.
+    for n in w.npcs():
+        w.teste_dar(n.id, 0, 0, 20, True)
+    # Interrupção: assim que alguém estiver construindo, fica com fome.
+    interrompido = None
+    while w.tempo < 60 * 2:
+        w.avancar(0.5)
+        for n in w.npcs():
+            if n.estado == E.TRABALHANDO and n.tarefa == T.CONSTRUIR and interrompido is None:
+                w.avancar(10)  # trabalha 10 s
+                w.teste_npc(n.id, 60, 100, n.hp)  # fome < 70
+                interrompido = n.id
+        if interrompido is not None:
+            break
+    w.avancar(1.0)
+    n = w.npcs()[interrompido]
+    assert n.estado != E.TRABALHANDO and n.tarefa == T.CONSTRUIR
+    assert 100 < n.tarefa_restante < 120, n.tarefa_restante  # guardou o progresso
+    # Alimenta: ele volta e termina o que faltava.
+    while n.tarefa == T.CONSTRUIR and w.tempo < 60 * 6:
+        _alimentar(w)
+        w.avancar(0.5)
+        n = w.npcs()[interrompido]
+    assert n.tarefa == T.NENHUMA and n.abrigo_casa >= 0
+
+    # Noite: às 21:00, põe cada morador ao lado do abrigo dele (só no teste:
+    # com as regras de hoje, quem está longe não chega a tempo). Ele deve
+    # entrar quando chega o frio (5°), dormir e sair às 06:00.
+    while w.tempo < 15 * 60:  # até 21:00
+        _alimentar(w)
+        w.avancar(1.0)
+    for m in w.npcs():
+        if m.estado == E.MORTO or m.abrigo_casa < 0:
+            continue
+        a = w.abrigos()[m.abrigo_casa]
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx or dy) and m.dentro_abrigo < 0 and w.teste_mover(m.id, a.pos.x + dx, a.pos.y + dy):
+                    break
+            else:
+                continue
+            break
+    dormiu = False
+    while w.tempo < (24 + 1) * 60:  # até 07:00 do dia 2
+        _alimentar(w)
+        hp = {m.id: (m.hp, m.fome, m.sede, m.dentro_abrigo) for m in w.npcs()}
+        w.avancar(1.0)
+        hora = w.relogio().hora
+        for m in w.npcs():
+            hp0, f0, s0, d0 = hp[m.id]
+            if d0 >= 0 and m.dentro_abrigo >= 0:
+                assert m.estado == E.DORMINDO or hora == 6
+                assert m.fome == f0 and m.sede == s0       # não abaixam
+                assert abs(m.hp - min(100, hp0 + 1)) < 1e-6  # +1 de HP por s
+                dormiu = True
+            if m.dentro_abrigo >= 0:
+                assert not w.e_dia() or hora == 6          # sai às 06:00
+    assert dormiu
+    print("ok  abrigo à noite: dorme, sem frio/fome/sede, HP +1/s, sai às 06:00; "
+          "trabalho parado pela fome guarda o progresso e é retomado")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_relogio()
@@ -566,6 +705,8 @@ if __name__ == "__main__":
     teste_memoria()
     teste_carregar()
     teste_explorar()
+    teste_trabalho()
+    teste_noite_no_abrigo()
     teste_vegetal()
     teste_relevo_npc()
     teste_agua()

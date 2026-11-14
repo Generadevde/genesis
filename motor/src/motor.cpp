@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.9: explorar (docs/EXPLORAR.md).
-    return "Genesis — motor 0.9 (explorar)";
+    // Versão 0.10: pedra, ferramentas, lenha e abrigo (docs/ABRIGO.md).
+    return "Genesis — motor 0.10 (abrigo)";
 }
 
 }  // namespace genesis

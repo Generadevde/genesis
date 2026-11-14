@@ -51,7 +51,12 @@ SIMBOLO = {
     int(OC.CORPO): "✝",
     int(OC.MUDA): "♣",
     int(OC.MACIEIRA_SECA): "🌳",  # desenhada em cinza (ver Simbolos.get)
+    int(OC.PEDRA): "⬟",
+    int(OC.ABRIGO): "🏠",
 }
+# Símbolos que não existem na fonte do mapa: desenhados com a fonte da
+# interface (DejaVu Sans), que tem o ⬟.
+SIMBOLOS_FONTE_UI = {"⬟"}
 MAT = gm.Material
 # Materiais do chão: símbolo, cor e nome (escolhidos pelo dono do projeto).
 MATERIAL = {
@@ -72,6 +77,19 @@ NOME_ESTADO = {
     EST.INDO_BEBER: "indo beber",
     EST.BEBENDO: "bebendo",
     EST.INDO_PEGAR: "indo pegar maçã",
+    EST.INDO_TRABALHAR: "indo trabalhar",
+    EST.TRABALHANDO: "trabalhando",
+    EST.INDO_ABRIGO: "indo para o abrigo (frio)",
+    EST.DORMINDO: "dormindo no abrigo",
+}
+
+TAREFA = gm.Tarefa
+NOME_TAREFA = {
+    TAREFA.NENHUMA: "nenhum",
+    TAREFA.LASCAS: "tirar lascas da pedra",
+    TAREFA.GALHOS: "tirar galhos da árvore",
+    TAREFA.CORTAR: "cortar árvore (lenha)",
+    TAREFA.CONSTRUIR: "construir abrigo",
 }
 
 # Zoom (escolhido pelo dono do projeto): + aproxima, - afasta.
@@ -98,6 +116,7 @@ COD_MATERIAL = 100
 PRIORIDADE = {
     int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
     int(OC.MACIEIRA_SECA): 6, int(OC.MUDA): 5.5,  # PROVISÓRIO
+    int(OC.ABRIGO): 8.5, int(OC.PEDRA): 5.6,      # PROVISÓRIO
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
     COD_MATERIAL + int(MAT.AREIA): 5,
     COD_MATERIAL + int(MAT.AGUA): 4,
@@ -150,6 +169,12 @@ class Simbolos:
                   "  sudo apt install fonts-noto-color-emoji")
         self._fontes_mapa = {}
 
+    def _fonte_ui(self, tamanho: int) -> pygame.font.Font:
+        chave = ("ui", tamanho)
+        if chave not in self._fontes_mapa:
+            self._fontes_mapa[chave] = pygame.font.Font(A.FONTE_UI, tamanho)
+        return self._fontes_mapa[chave]
+
     def _fonte_mapa(self, tamanho: int) -> pygame.font.Font:
         if tamanho not in self._fontes_mapa:
             self._fontes_mapa[tamanho] = pygame.font.Font(A.FONTE_MAPA, tamanho)
@@ -170,6 +195,8 @@ class Simbolos:
             emoji = ord(simbolo[0]) > 0x1F000
             if emoji and self._emoji:
                 img = self._emoji.render(simbolo, True, A.PRETO)
+            elif simbolo in SIMBOLOS_FONTE_UI:
+                img = self._fonte_ui(lado).render(simbolo, True, cor)
             else:
                 img = self._fonte_mapa(lado).render(simbolo, True, cor)
             # Encaixa no quadrado lado x lado sem deformar.
@@ -348,10 +375,33 @@ class Genesis:
 
     @staticmethod
     def texto_carregando(n) -> str:
-        """O que o NPC leva na mão (hoje só maçã, no máximo 1)."""
-        if n.macas_carregadas == 0:
-            return "nada"
-        return "1 maçã" if n.macas_carregadas == 1 else f"{n.macas_carregadas} maçãs"
+        """O que o NPC leva: maçã, lascas, galhos, lenha, machado."""
+        partes = []
+        if n.macas_carregadas:
+            partes.append("1 maçã" if n.macas_carregadas == 1
+                          else f"{n.macas_carregadas} maçãs")
+        for qtd, um, varios in ((n.lascas, "lasca", "lascas"),
+                                (n.galhos, "galho", "galhos"),
+                                (n.lenha, "lenha", "lenhas")):
+            if qtd:
+                partes.append(f"{qtd} {um if qtd == 1 else varios}")
+        if n.machado:
+            partes.append("machado")
+        return ", ".join(partes) if partes else "nada"
+
+    @staticmethod
+    def texto_tarefa(n) -> str:
+        texto = NOME_TAREFA[n.tarefa]
+        if n.tarefa != TAREFA.NENHUMA and n.tarefa_restante > 0:
+            texto += f" (parado, falta {duracao(n.tarefa_restante)})"
+        return texto
+
+    def texto_abrigo(self, n) -> str:
+        if n.abrigo_casa < 0:
+            return "não tem"
+        a = self.mundo.abrigos()[n.abrigo_casa]
+        onde = "dentro" if n.dentro_abrigo >= 0 else "fora"
+        return f"({a.pos.x}, {a.pos.y}, {a.pos.z:+d}) — {onde}"
 
     @staticmethod
     def texto_estado(n) -> str:
@@ -370,7 +420,8 @@ class Genesis:
             if simb == " ":
                 return None  # ar sem nada embaixo: fica preto
             return self.simbolos.get(simb, lado, cor)
-        cor = {int(OC.CORPO): A.COR_CRUZ, int(OC.MUDA): A.COR_MUDA}.get(cod, A.PRETO)
+        cor = {int(OC.CORPO): A.COR_CRUZ, int(OC.MUDA): A.COR_MUDA,
+               int(OC.PEDRA): A.COR_PEDRA_ENTIDADE}.get(cod, A.PRETO)
         return self.simbolos.get(SIMBOLO[cod], lado, cor,
                                  cinza=(cod == int(OC.MACIEIRA_SECA)))
 
@@ -409,6 +460,8 @@ class Genesis:
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
                       f"Carregando: {self.texto_carregando(n)}",
+                      f"Trabalho: {self.texto_tarefa(n)}",
+                      f"Abrigo: {self.texto_abrigo(n)}",
                       f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
                       "",
                       "Memória:"]
@@ -441,6 +494,17 @@ class Genesis:
                 falta = self.mundo.falta_virar_muda(x, y)
                 return "🍎", A.PRETO, ["Maçã", pos,
                                        f"Vira muda em: {duracao(falta)}"]
+            if o == OC.PEDRA:
+                p = self.mundo.pedras()[self.mundo.pedra_em(x, y)]
+                return "⬟", A.COR_PEDRA_ENTIDADE, ["Pedra", pos,
+                                                   f"Lascas: {p.lascas}"]
+            if o == OC.ABRIGO:
+                a = self.mundo.abrigos()[self.mundo.abrigo_em(x, y)]
+                nomes = {n.id: n.nome for n in self.mundo.npcs()}
+                mor = ", ".join(nomes[i] for i in a.moradores) or "ninguém"
+                den = ", ".join(nomes[i] for i in a.dentro) or "ninguém"
+                return "🏠", A.PRETO, ["Abrigo", pos, f"Moradores: {mor}",
+                                       f"Dentro agora: {den}"]
             if o == OC.MUDA:
                 u = self.mundo.muda_em(x, y)
                 return "♣", A.COR_MUDA, ["Muda", pos,
@@ -474,7 +538,7 @@ class Genesis:
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
         # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
-        fundo = A.FUNDO_MAPA if simb and simb in "\"ndpa~♣ " else A.FUNDO_CAMPO
+        fundo = A.FUNDO_MAPA if simb and simb in "\"ndpa~♣⬟ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
             # cor None = o símbolo em cinza (macieira seca)
@@ -558,6 +622,10 @@ class Genesis:
             return "Macieira seca"
         if cod == int(OC.MUDA):
             return "Muda"
+        if cod == int(OC.PEDRA):
+            return "Pedra"
+        if cod == int(OC.ABRIGO):
+            return "Abrigo"
         if cod == int(OC.MACA):
             return "Maçã"
         return MATERIAL[cod - COD_MATERIAL][2]

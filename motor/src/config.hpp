@@ -139,6 +139,29 @@ inline constexpr double MUDA_VIRA_ARVORE_DIAS = 3.0;
 inline constexpr double MACIEIRA_VIDA_DIAS = 7.0;
 inline constexpr double MACIEIRA_SECA_H = 4.0;
 
+// --- Pedras, ferramentas, lenha e abrigo (pedido em 14/11/2026) ------------
+// 3 pedras por mapa; cada uma tem 10 lascas e some quando esgota.
+inline constexpr int NUM_PEDRAS = 3;
+inline constexpr int PEDRA_LASCAS = 10;
+// Tirar lascas: 30 s, dá 2 lascas. Tirar galhos de uma árvore (viva ou
+// seca): 30 s, dá 1 galho, não estraga a árvore.
+inline constexpr double TIRAR_LASCAS_S = 30.0;
+inline constexpr int LASCAS_POR_VEZ = 2;
+inline constexpr double TIRAR_GALHOS_S = 30.0;
+inline constexpr int GALHOS_POR_VEZ = 1;
+// Machado primitivo: gasta 6 lascas e 2 galhos; feito na hora; dura para sempre.
+inline constexpr int MACHADO_LASCAS = 6;
+inline constexpr int MACHADO_GALHOS = 2;
+// Cortar uma árvore (viva ou seca) com o machado: 30 minutos do jogo; a
+// árvore some e dá 30 lenhas.
+inline constexpr double CORTAR_H = 0.5;
+inline constexpr int LENHA_POR_ARVORE = 30;
+// Abrigo 🏠: gasta 20 lenhas, leva 2 horas para construir (na célula onde o
+// NPC está), ocupa a célula, cabe 2 NPCs e dura para sempre.
+inline constexpr int ABRIGO_LENHA = 20;
+inline constexpr double CONSTRUIR_H = 2.0;
+inline constexpr int ABRIGO_VAGAS = 2;
+
 // Comer uma maçã leva 10 s.
 inline constexpr double COMER_DURACAO_S = 10.0;
 

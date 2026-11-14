@@ -57,7 +57,26 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("NPC", Ocupante::Npc)
         .value("CORPO", Ocupante::Corpo)
         .value("MUDA", Ocupante::Muda)
-        .value("MACIEIRA_SECA", Ocupante::MacieiraSeca);
+        .value("MACIEIRA_SECA", Ocupante::MacieiraSeca)
+        .value("PEDRA", Ocupante::Pedra)
+        .value("ABRIGO", Ocupante::Abrigo);
+
+    py::enum_<Tarefa>(m, "Tarefa")
+        .value("NENHUMA", Tarefa::Nenhuma)
+        .value("LASCAS", Tarefa::Lascas)
+        .value("GALHOS", Tarefa::Galhos)
+        .value("CORTAR", Tarefa::Cortar)
+        .value("CONSTRUIR", Tarefa::Construir);
+
+    py::class_<Pedra>(m, "Pedra")
+        .def_readonly("pos", &Pedra::pos)
+        .def_readonly("lascas", &Pedra::lascas)
+        .def_readonly("existe", &Pedra::existe);
+
+    py::class_<Abrigo>(m, "Abrigo")
+        .def_readonly("pos", &Abrigo::pos)
+        .def_readonly("moradores", &Abrigo::moradores)
+        .def_readonly("dentro", &Abrigo::dentro);
 
     py::enum_<EstadoNpc>(m, "EstadoNpc")
         .value("VAGANDO", EstadoNpc::Vagando)
@@ -66,7 +85,11 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("MORTO", EstadoNpc::Morto)
         .value("INDO_BEBER", EstadoNpc::IndoBeber)
         .value("BEBENDO", EstadoNpc::Bebendo)
-        .value("INDO_PEGAR", EstadoNpc::IndoPegar);
+        .value("INDO_PEGAR", EstadoNpc::IndoPegar)
+        .value("INDO_TRABALHAR", EstadoNpc::IndoTrabalhar)
+        .value("TRABALHANDO", EstadoNpc::Trabalhando)
+        .value("INDO_ABRIGO", EstadoNpc::IndoAbrigo)
+        .value("DORMINDO", EstadoNpc::Dormindo);
 
     py::class_<Macieira>(m, "Macieira")
         .def_readonly("pos", &Macieira::pos)
@@ -87,6 +110,16 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("nome", &Npc::nome)
         .def_readonly("macas_carregadas", &Npc::macas_carregadas)
         .def_readonly("comendo_da_mao", &Npc::comendo_da_mao)
+        .def_readonly("lascas", &Npc::lascas)
+        .def_readonly("galhos", &Npc::galhos)
+        .def_readonly("lenha", &Npc::lenha)
+        .def_readonly("machado", &Npc::machado)
+        .def_readonly("tarefa", &Npc::tarefa)
+        .def_readonly("tarefa_pos", &Npc::tarefa_pos)
+        .def_readonly("tarefa_restante", &Npc::tarefa_restante)
+        .def_readonly("abrigo_casa", &Npc::abrigo_casa)
+        .def_readonly("dentro_abrigo", &Npc::dentro_abrigo)
+        .def_readonly("pedras_lembradas", &Npc::pedras_lembradas)
         .def_readonly("pos", &Npc::pos)
         .def_readonly("hp", &Npc::hp)
         .def_readonly("causa_morte", &Npc::causa_morte)
@@ -145,6 +178,17 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def("macieiras", &Mundo::macieiras)
         .def("macas", &Mundo::macas)
         .def("mudas", &Mundo::mudas)
+        .def("pedras", &Mundo::pedras)
+        .def("abrigos", &Mundo::abrigos)
+        .def("pedra_em", &Mundo::pedra_em, py::arg("x"), py::arg("y"))
+        .def("abrigo_em", &Mundo::abrigo_em, py::arg("x"), py::arg("y"))
+        .def("teste_npc", &Mundo::teste_npc, py::arg("id"), py::arg("fome"),
+             py::arg("sede"), py::arg("hp"), "SÓ PARA TESTES: muda fome/sede/HP.")
+        .def("teste_dar", &Mundo::teste_dar, py::arg("id"), py::arg("lascas"),
+             py::arg("galhos"), py::arg("lenha"), py::arg("machado"),
+             "SÓ PARA TESTES: dá itens ao NPC.")
+        .def("teste_mover", &Mundo::teste_mover, py::arg("id"), py::arg("x"),
+             py::arg("y"), "SÓ PARA TESTES: põe o NPC numa célula livre.")
         .def("macieira_em", &Mundo::macieira_em, py::arg("x"), py::arg("y"))
         .def("muda_em", [](const Mundo& w, int x, int y) -> py::object {
             const Muda* u = w.muda_em(x, y);

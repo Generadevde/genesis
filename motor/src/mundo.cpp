@@ -64,6 +64,15 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
     // Todas nascem com idade 0 (decisão do dono do projeto).
     for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) nova_macieira(sortear_grama_livre());
 
+    // 3 pedras em células de terra livres, cada uma com 10 lascas.
+    for (int i = 0; i < cfg::NUM_PEDRAS; ++i) {
+        Pedra p;
+        p.pos = sortear_grama_livre();
+        p.lascas = cfg::PEDRA_LASCAS;
+        ocupar(indice(p.pos), Ocupante::Pedra);
+        pedras_.push_back(p);
+    }
+
     // 4 NPCs em células de grama livres, com fome e sede iniciais 100.
     for (int i = 0; i < cfg::NUM_NPCS; ++i) {
         Npc n;
@@ -148,7 +157,8 @@ void Mundo::avancar(double dt) {
             if (n.estado == EstadoNpc::Morto) continue;
             proximo = std::min({proximo, n.falta_fome, n.falta_sede,
                                 n.falta_passo});
-            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
+            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo ||
+                n.estado == EstadoNpc::Trabalhando)
                 proximo = std::min(proximo, n.falta_acao);
         }
         if (!fila_.empty()) proximo = std::min(proximo, fila_.top().quando - tempo_);
@@ -175,7 +185,8 @@ void Mundo::avancar(double dt) {
             n.falta_fome -= passo;
             n.falta_sede -= passo;
             n.falta_passo -= passo;
-            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
+            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo ||
+                n.estado == EstadoNpc::Trabalhando)
                 n.falta_acao -= passo;
         }
         for (size_t k = 0; k < npcs_.size(); ++k) {
@@ -203,6 +214,8 @@ void Mundo::avancar(double dt) {
                 evento_fim_comer(n);
             if (n.estado == EstadoNpc::Bebendo && n.falta_acao <= EPS)
                 evento_fim_beber(n);
+            if (n.estado == EstadoNpc::Trabalhando && n.falta_acao <= EPS)
+                evento_fim_trabalho(n);
             if (n.estado != EstadoNpc::Morto && n.falta_passo <= EPS) {
                 n.falta_passo += cfg::NPC_PASSO_S;
                 evento_passo(n);
@@ -263,7 +276,8 @@ void Mundo::avancar(double dt) {
 // A cada 5 s: fome abaixa 3, até 0.
 // Enquanto está comendo, a fome NÃO abaixa (pedido do dono do projeto).
 void Mundo::evento_fome(Npc& n) {
-    if (n.estado == EstadoNpc::Comendo) return;
+    // Comendo, ou dentro do abrigo ("dentro não faz fome"): não abaixa.
+    if (n.estado == EstadoNpc::Comendo || n.dentro_abrigo >= 0) return;
     // Chegou a 0: fica em 0 (crítico — o NPC perde HP; ver taxa_hp).
     n.fome = std::max(cfg::FOME_MINIMA, n.fome - cfg::FOME_QUEDA);
 }
@@ -273,7 +287,9 @@ void Mundo::evento_fome(Npc& n) {
 void Mundo::evento_sede(Npc& n) {
     // Bebendo, a sede não abaixa; comendo maçã também não (a maçã mata a
     // sede um pouco — pedido do dono do projeto).
-    if (n.estado == EstadoNpc::Bebendo || n.estado == EstadoNpc::Comendo) return;
+    if (n.estado == EstadoNpc::Bebendo || n.estado == EstadoNpc::Comendo ||
+        n.dentro_abrigo >= 0)  // dentro do abrigo "não faz sede"
+        return;
     // Chegou a 0: fica em 0 (crítico — o NPC perde HP; ver taxa_hp).
     n.sede = std::max(cfg::SEDE_MINIMA, n.sede - cfg::SEDE_QUEDA);
 }
@@ -288,24 +304,49 @@ void Mundo::evento_sede(Npc& n) {
 //   - Nada à vista (ou nada baixo): anda aleatoriamente.
 // Empate: a sede vem primeiro — PROVISÓRIO, aguardando o dono.
 void Mundo::evento_passo(Npc& n) {
+    // --- Dentro do abrigo: dorme até as 06:00; depois sai ------------------
+    if (n.dentro_abrigo >= 0) {
+        if (e_dia()) sair_abrigo(n);
+        else n.estado = EstadoNpc::Dormindo;
+        return;
+    }
     if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
         return;  // ocupado: fica parado
 
     const bool com_fome = n.fome < cfg::FOME_LIMITE_COMER;
     const bool com_sede = n.sede < cfg::SEDE_LIMITE_BEBER;
-    if (com_fome && com_sede) {
-        // Prioridade pela URGÊNCIA: a que vai ficar crítica antes vem
-        // primeiro (decisão do dono do projeto).
-        if (ate_critico_sede(n) <= ate_critico_fome(n)) {
-            if (tentar_beber(n) || tentar_comer(n)) return;
-        } else {
-            if (tentar_comer(n) || tentar_beber(n)) return;
-        }
-    } else if (com_fome) {
-        if (tentar_comer(n)) return;
-    } else if (com_sede) {
-        if (tentar_beber(n)) return;
+    const bool com_frio = temperatura() <= cfg::TEMP_FRIO;
+
+    // Trabalhando e apareceu uma necessidade: para, guarda o progresso e vai
+    // cuidar dela; depois volta (decisão do dono do projeto).
+    if (n.estado == EstadoNpc::Trabalhando) {
+        if (!com_fome && !com_sede && !(com_frio && n.abrigo_casa >= 0)) return;
+        pausar_trabalho(n);
     }
+
+    conhecer_abrigos(n);
+
+    // --- Necessidades, na ordem da URGÊNCIA (tempo até ficar crítica) -----
+    // (frio só conta se ele tem abrigo para onde ir)
+    struct Nec { double urgencia; int tipo; };  // 0 = comer, 1 = beber, 2 = abrigo
+    std::vector<Nec> necs;
+    if (com_fome) necs.push_back({ate_critico_fome(n), 0});
+    if (com_sede) necs.push_back({ate_critico_sede(n), 1});
+    if (com_frio && n.abrigo_casa >= 0) necs.push_back({ate_critico_frio(), 2});
+    // Empate: abrigo, depois sede, depois fome — PROVISÓRIO.
+    std::stable_sort(necs.begin(), necs.end(), [](const Nec& a, const Nec& b) {
+        if (a.urgencia != b.urgencia) return a.urgencia < b.urgencia;
+        return a.tipo > b.tipo;
+    });
+    for (const Nec& c : necs) {
+        if (c.tipo == 0 && tentar_comer(n)) return;
+        if (c.tipo == 1 && tentar_beber(n)) return;
+        if (c.tipo == 2 && ir_para_abrigo(n)) return;
+    }
+
+    // --- Saciado (sem fome nem sede): sem abrigo, a necessidade é fazer um
+    //     (por causa da temperatura). Também retoma trabalho que parou.
+    if (!com_fome && !com_sede && cadeia_abrigo(n)) return;
 
     // --- Sem precisar comer/beber: se vê uma maçã e tem a mão livre, vai
     //     pegar para levar consigo (pedido do dono do projeto).
@@ -455,7 +496,7 @@ bool Mundo::tentar_beber(Npc& n) {
         n.falta_acao = cfg::BEBER_DURACAO_S;
         return true;
     }
-    passo_em_direcao(n, agua);
+    passo_em_direcao(n, agua, Chegar::ParaBeber);
     return true;
 }
 
@@ -518,13 +559,51 @@ bool Mundo::ir_a_agua_lembrada(Npc& n) {
     n.alvo = melhor;
     n.tem_alvo = true;
     n.pela_memoria = true;
-    passo_em_direcao(n, melhor);
+    passo_em_direcao(n, melhor, Chegar::ParaBeber);
     return true;
 }
 
-// Um passo para a vizinha livre que mais aproxima do alvo.
-// Sem vizinha livre: fica parado e tenta de novo no próximo passo.
-void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
+// --- Caminhos ---------------------------------------------------------------
+
+bool Mundo::chegou(Pos q, Pos alvo, Chegar como) const {
+    if (como == Chegar::NaCelula) return q.x == alvo.x && q.y == alvo.y;
+    if (distancia_passos(q, alvo) != 1) return false;
+    if (como == Chegar::ParaBeber) {
+        const int desnivel = q.z - alvo.z;
+        return desnivel >= 0 && desnivel <= cfg::NPC_DEGRAU_MAX;
+    }
+    return true;
+}
+
+// Busca em largura: a partir de onde o NPC está, visita as colunas vizinhas
+// onde dá para pisar (livre e degrau de no máximo 1), em ordem de distância.
+// O primeiro lugar que serve é o mais perto A PÉ; volta pelo caminho até o
+// primeiro passo e dá esse passo.
+bool Mundo::passo_em_direcao(Npc& n, Pos alvo, Chegar como) {
+    if (chegou(n.pos, alvo, como)) return true;
+    const int total = largura() * altura();
+    std::vector<int> pai(static_cast<size_t>(total), -2);  // -2 = não visitado
+    std::vector<Pos> fila;
+    fila.reserve(256);
+    const int ini = indice(n.pos);
+    pai[ini] = -1;
+    fila.push_back(n.pos);
+    for (size_t k = 0; k < fila.size(); ++k) {
+        const Pos cur = fila[k];
+        if (k > 0 && chegou(cur, alvo, como)) {
+            int i = indice(cur);
+            while (pai[i] != ini) i = pai[i];  // volta até o 1º passo
+            mover(n, com_z({i % largura(), i / largura()}));
+            return true;
+        }
+        for (Pos v : VIZINHOS) {
+            Pos p = com_z({cur.x + v.x, cur.y + v.y});
+            if (!dentro(p) || pai[indice(p)] != -2 || !pode_pisar(cur, p)) continue;
+            pai[indice(p)] = indice(cur);
+            fila.push_back(p);
+        }
+    }
+    // Sem caminho: dá o passo que mais aproxima em linha reta (como antes).
     bool achou = false;
     Pos melhor{};
     int melhor_passos = 0, melhor_d2 = 0;
@@ -541,6 +620,23 @@ void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
         }
     }
     if (achou) mover(n, melhor);
+    return false;
+}
+
+std::vector<int> Mundo::distancias(Pos de) const {
+    std::vector<int> d(static_cast<size_t>(largura()) * altura(), -1);
+    std::vector<Pos> fila{de};
+    d[indice(de)] = 0;
+    for (size_t k = 0; k < fila.size(); ++k) {
+        const Pos cur = fila[k];
+        for (Pos v : VIZINHOS) {
+            Pos p = com_z({cur.x + v.x, cur.y + v.y});
+            if (!dentro(p) || d[indice(p)] != -1 || !pode_pisar(cur, p)) continue;
+            d[indice(p)] = d[indice(cur)] + 1;
+            fila.push_back(p);
+        }
+    }
+    return d;
 }
 
 // Terminou os 10 s comendo: a maçã some, a fome sobe 12 e a sede sobe 5
@@ -688,6 +784,309 @@ double Mundo::falta_virar_muda(int x, int y) const {
     return it == quando_muda_.end() ? -1.0 : it->second - tempo_;
 }
 
+// ===========================================================================
+// Abrigo e trabalho (pedra, galhos, machado, corte, construção)
+// ===========================================================================
+
+double Mundo::duracao_tarefa(Tarefa t) const {
+    switch (t) {
+        case Tarefa::Lascas: return cfg::TIRAR_LASCAS_S;
+        case Tarefa::Galhos: return cfg::TIRAR_GALHOS_S;
+        case Tarefa::Cortar: return cfg::CORTAR_H * cfg::SEGUNDOS_POR_HORA;
+        case Tarefa::Construir: return cfg::CONSTRUIR_H * cfg::SEGUNDOS_POR_HORA;
+        default: return 0.0;
+    }
+}
+
+// Vê um abrigo com vaga de morador (até 2)? Vira morador dele. É o abrigo
+// para onde ele vai quando faz frio.
+void Mundo::conhecer_abrigos(Npc& n) {
+    if (n.abrigo_casa >= 0) return;
+    const int metade = cfg::VISAO_LADO / 2;
+    for (int a = 0; a < static_cast<int>(abrigos_.size()); ++a) {
+        const Abrigo& ab = abrigos_[a];
+        const int dx = ab.pos.x - n.pos.x, dy = ab.pos.y - n.pos.y;
+        if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
+        if (static_cast<int>(ab.moradores.size()) >= cfg::ABRIGO_VAGAS) continue;
+        abrigos_[a].moradores.push_back(n.id);
+        n.abrigo_casa = a;
+        return;
+    }
+}
+
+// Com frio: vai para o abrigo dele; ao lado, entra (se houver lugar).
+bool Mundo::ir_para_abrigo(Npc& n) {
+    if (n.abrigo_casa < 0) return false;
+    const Abrigo& ab = abrigos_[n.abrigo_casa];
+    const int desnivel = std::abs(ab.pos.z - n.pos.z);
+    if (distancia_passos(n.pos, ab.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX &&
+        static_cast<int>(ab.dentro.size()) < cfg::ABRIGO_VAGAS) {
+        entrar_abrigo(n, n.abrigo_casa);
+        return true;
+    }
+    n.estado = EstadoNpc::IndoAbrigo;
+    n.tem_alvo = true;
+    n.alvo = ab.pos;
+    passo_em_direcao(n, ab.pos);
+    return true;
+}
+
+void Mundo::entrar_abrigo(Npc& n, int a) {
+    ocupar(indice(n.pos), Ocupante::Nada);  // sai da célula onde estava
+    n.anterior = n.pos;
+    n.pos = abrigos_[a].pos;
+    n.dentro_abrigo = a;
+    abrigos_[a].dentro.push_back(n.id);
+    n.estado = EstadoNpc::Dormindo;
+    n.tem_alvo = false;
+}
+
+// Sai para uma célula livre ao lado do abrigo (se não houver, espera).
+void Mundo::sair_abrigo(Npc& n) {
+    Abrigo& ab = abrigos_[n.dentro_abrigo];
+    for (Pos v : VIZINHOS) {
+        Pos p = com_z({ab.pos.x + v.x, ab.pos.y + v.y});
+        if (!pode_pisar(ab.pos, p)) continue;
+        ab.dentro.erase(std::find(ab.dentro.begin(), ab.dentro.end(), n.id));
+        n.dentro_abrigo = -1;
+        n.pos = p;
+        ocupar(indice(p), Ocupante::Npc);
+        n.estado = EstadoNpc::Vagando;
+        return;
+    }
+}
+
+// Segundos até a temperatura ficar abaixo de 4° (0 se já está).
+double Mundo::ate_critico_frio() const {
+    if (temperatura() < cfg::TEMP_CRITICA) return 0.0;
+    const double passo = cfg::SEGUNDOS_POR_HORA / 60.0;  // 1 minuto do jogo
+    for (double t = passo; t <= cfg::SEGUNDOS_POR_DIA; t += passo)
+        if (temperatura_em(tempo_ + t) < cfg::TEMP_CRITICA) return t;
+    return cfg::SEGUNDOS_POR_DIA;
+}
+
+// A "necessidade de abrigo" (saciado e sem abrigo), ou um trabalho parado.
+bool Mundo::cadeia_abrigo(Npc& n) {
+    if (n.tarefa == Tarefa::Nenhuma) {
+        if (n.abrigo_casa >= 0) return false;  // já tem abrigo
+        if (!escolher_tarefa(n)) return false;  // nada à vista: explora
+    }
+    return trabalhar(n);
+}
+
+// Qual o próximo trabalho para chegar ao abrigo?
+//   lenha >= 20 -> construir aqui;  machado -> cortar uma árvore;
+//   senão: lascas (até 6) e galhos (até 2) para o machado — o que estiver
+//   mais perto entre os dois que faltam.
+bool Mundo::escolher_tarefa(Npc& n) {
+    fazer_machado(n);
+    if (n.lenha >= cfg::ABRIGO_LENHA) {
+        n.tarefa = Tarefa::Construir;
+        n.tarefa_pos = n.pos;
+        n.tarefa_alvo = -1;
+        n.tarefa_restante = 0.0;
+        return true;
+    }
+    int idx_pedra = -1, idx_arvore = -1;
+    Pos p_pedra{}, p_arvore{};
+    const bool quer_lascas = !n.machado && n.lascas < cfg::MACHADO_LASCAS;
+    const bool quer_arvore = n.machado || n.galhos < cfg::MACHADO_GALHOS;
+    const bool tem_pedra = quer_lascas && procurar_recurso(n, true, idx_pedra, p_pedra);
+    const bool tem_arvore = quer_arvore && procurar_recurso(n, false, idx_arvore, p_arvore);
+    bool usar_pedra = tem_pedra;
+    if (tem_pedra && tem_arvore)
+        usar_pedra = distancia_passos(n.pos, p_pedra) <= distancia_passos(n.pos, p_arvore);
+    if (usar_pedra) {
+        n.tarefa = Tarefa::Lascas;
+        n.tarefa_alvo = idx_pedra;
+        n.tarefa_pos = p_pedra;
+    } else if (tem_arvore) {
+        n.tarefa = n.machado ? Tarefa::Cortar : Tarefa::Galhos;
+        n.tarefa_alvo = idx_arvore;
+        n.tarefa_pos = p_arvore;
+    } else {
+        return false;
+    }
+    n.tarefa_restante = 0.0;
+    return true;
+}
+
+// Procura uma pedra (pedra = true) ou árvore: primeiro a mais próxima que
+// ele VÊ (32 x 32); se não vê nenhuma, a mais próxima que ele LEMBRA.
+bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
+                             Pos& onde) const {
+    // "Mais perto" = menos passos A PÉ até ficar ao lado (só os que dá para
+    // alcançar). Primeiro os que ele VÊ (32 x 32); se nenhum, os que LEMBRA.
+    const std::vector<int> d = distancias(n.pos);
+    auto passos_ate = [&](Pos alvo) {
+        int melhor = -1;
+        for (Pos v : VIZINHOS) {
+            Pos q{alvo.x + v.x, alvo.y + v.y};
+            if (!dentro(q)) continue;
+            const int dq = d[indice(q)];
+            if (dq >= 0 && (melhor < 0 || dq < melhor)) melhor = dq;
+        }
+        return melhor;
+    };
+    const int metade = cfg::VISAO_LADO / 2;
+    int melhor_d = -1;
+    for (int dy = -metade; dy < metade; ++dy)
+        for (int dx = -metade; dx < metade; ++dx) {
+            Pos p{n.pos.x + dx, n.pos.y + dy};
+            if (!dentro(p)) continue;
+            const Ocupante o = ocupacao_[indice(p)];
+            const bool serve = pedra ? (o == Ocupante::Pedra)
+                                     : (o == Ocupante::Macieira || o == Ocupante::MacieiraSeca);
+            if (!serve) continue;
+            const int passos = passos_ate(p);
+            if (passos < 0) continue;  // não dá para chegar
+            if (melhor_d < 0 || passos < melhor_d) {
+                melhor_d = passos;
+                onde = com_z(p);
+                indice_achado = pedra ? pedra_em(p.x, p.y) : macieira_em(p.x, p.y);
+            }
+        }
+    if (melhor_d >= 0) return true;
+    const std::vector<int>& lembrados = pedra ? n.pedras_lembradas : n.macieiras_lembradas;
+    for (int idx : lembrados) {
+        const bool existe = pedra ? pedras_[idx].existe : macieiras_[idx].existe;
+        const Pos p = pedra ? pedras_[idx].pos : macieiras_[idx].pos;
+        // Ele não sabe se ela ainda existe: vai até lá e descobre (ver
+        // Mundo::trabalhar). Só pula as que ele já VÊ que não estão lá.
+        const int dx = p.x - n.pos.x, dy = p.y - n.pos.y;
+        const bool a_vista = dx >= -metade && dx < metade && dy >= -metade && dy < metade;
+        if (!existe && a_vista) continue;
+        const int passos = passos_ate(p);
+        if (passos < 0) continue;
+        if (melhor_d < 0 || passos < melhor_d) {
+            melhor_d = passos;
+            onde = p;
+            indice_achado = idx;
+        }
+    }
+    return melhor_d >= 0;
+}
+
+// Vai até o lugar do trabalho e trabalha. Se o alvo sumiu, desiste dele
+// (e esquece, se era lembrado).
+bool Mundo::trabalhar(Npc& n) {
+    // O alvo ainda existe?
+    bool existe = true;
+    if (n.tarefa == Tarefa::Lascas) existe = pedras_[n.tarefa_alvo].existe;
+    if (n.tarefa == Tarefa::Galhos || n.tarefa == Tarefa::Cortar)
+        existe = macieiras_[n.tarefa_alvo].existe;
+    const int d = distancia_passos(n.pos, n.tarefa_pos);
+    if (!existe) {
+        // Só descobre que sumiu chegando perto (ou vendo que não está lá).
+        if (d <= 1 || d < cfg::VISAO_LADO / 2) {
+            auto& lista = (n.tarefa == Tarefa::Lascas) ? n.pedras_lembradas
+                                                       : n.macieiras_lembradas;
+            auto it = std::find(lista.begin(), lista.end(), n.tarefa_alvo);
+            if (it != lista.end()) lista.erase(it);
+            n.tarefa = Tarefa::Nenhuma;
+            n.tarefa_restante = 0.0;
+            return false;
+        }
+    }
+    // Construir é na própria célula da obra; o resto, ao lado do alvo.
+    const bool chegou = (n.tarefa == Tarefa::Construir) ? (d == 0) : (d == 1);
+    if (!chegou) {
+        if (n.tarefa == Tarefa::Construir && !livre(n.tarefa_pos) && d != 0) {
+            n.estado = EstadoNpc::IndoTrabalhar;  // a obra está ocupada: espera
+            return true;
+        }
+        n.estado = EstadoNpc::IndoTrabalhar;
+        n.tem_alvo = true;
+        n.alvo = n.tarefa_pos;
+        const Chegar como = (n.tarefa == Tarefa::Construir) ? Chegar::NaCelula
+                                                            : Chegar::AoLado;
+        if (!passo_em_direcao(n, n.tarefa_pos, como)) {
+            // Não há caminho até lá: larga este trabalho (escolhe outro depois).
+            n.tarefa = Tarefa::Nenhuma;
+            n.tarefa_restante = 0.0;
+        }
+        return true;
+    }
+    n.estado = EstadoNpc::Trabalhando;
+    n.tem_alvo = true;
+    n.alvo = n.tarefa_pos;
+    n.falta_acao = (n.tarefa_restante > 0.0) ? n.tarefa_restante
+                                             : duracao_tarefa(n.tarefa);
+    n.tarefa_restante = 0.0;
+    return true;
+}
+
+// Fome, sede ou frio no meio do trabalho: guarda quanto falta.
+void Mundo::pausar_trabalho(Npc& n) {
+    n.tarefa_restante = std::max(n.falta_acao, 0.0);
+    n.estado = EstadoNpc::Vagando;
+}
+
+void Mundo::fazer_machado(Npc& n) {
+    if (n.machado || n.lascas < cfg::MACHADO_LASCAS || n.galhos < cfg::MACHADO_GALHOS)
+        return;
+    n.lascas -= cfg::MACHADO_LASCAS;
+    n.galhos -= cfg::MACHADO_GALHOS;
+    n.machado = true;  // feito na hora; dura para sempre
+}
+
+void Mundo::evento_fim_trabalho(Npc& n) {
+    const Tarefa t = n.tarefa;
+    n.tarefa = Tarefa::Nenhuma;
+    n.tarefa_restante = 0.0;
+    n.estado = EstadoNpc::Vagando;
+    n.tem_alvo = false;
+    if (t == Tarefa::Lascas) {
+        Pedra& p = pedras_[n.tarefa_alvo];
+        if (!p.existe) return;
+        const int tirou = std::min(cfg::LASCAS_POR_VEZ, p.lascas);
+        p.lascas -= tirou;
+        n.lascas += tirou;
+        if (std::find(n.pedras_lembradas.begin(), n.pedras_lembradas.end(),
+                      n.tarefa_alvo) == n.pedras_lembradas.end())
+            n.pedras_lembradas.push_back(n.tarefa_alvo);
+        if (p.lascas <= 0) {  // esgotou: a pedra some
+            p.existe = false;
+            ocupar(indice(p.pos), Ocupante::Nada);
+        }
+        fazer_machado(n);
+    } else if (t == Tarefa::Galhos) {
+        if (!macieiras_[n.tarefa_alvo].existe) return;
+        n.galhos += cfg::GALHOS_POR_VEZ;  // a árvore não se estraga
+        lembrar_macieira(n, n.tarefa_alvo);
+        fazer_machado(n);
+    } else if (t == Tarefa::Cortar) {
+        Macieira& m = macieiras_[n.tarefa_alvo];
+        if (!m.existe) return;
+        m.existe = false;  // a árvore (viva ou seca) some
+        ocupar(indice(m.pos), Ocupante::Nada);
+        n.lenha += cfg::LENHA_POR_ARVORE;
+    } else if (t == Tarefa::Construir) {
+        n.lenha -= cfg::ABRIGO_LENHA;
+        Abrigo ab;
+        ab.pos = n.pos;
+        ab.moradores.push_back(n.id);
+        ab.dentro.push_back(n.id);  // terminou a obra lá dentro
+        const int a = static_cast<int>(abrigos_.size());
+        abrigos_.push_back(ab);
+        ocupar(indice(n.pos), Ocupante::Abrigo);
+        n.abrigo_casa = a;
+        n.dentro_abrigo = a;
+    }
+}
+
+int Mundo::pedra_em(int x, int y) const {
+    for (int i = 0; i < static_cast<int>(pedras_.size()); ++i)
+        if (pedras_[i].existe && pedras_[i].pos.x == x && pedras_[i].pos.y == y) return i;
+    return -1;
+}
+
+int Mundo::abrigo_em(int x, int y) const {
+    for (int i = 0; i < static_cast<int>(abrigos_.size()); ++i)
+        if (abrigos_[i].pos.x == x && abrigos_[i].pos.y == y) return i;
+    return -1;
+}
+
 // Uma maçã cai em volta da macieira: na primeira camada que tiver célula
 // de grama livre (camada 1 = as 8 vizinhas; se lotada, camada 2; e assim
 // por diante). Dentro da camada, a célula é sorteada.
@@ -785,6 +1184,10 @@ double Mundo::proximo_marco_temperatura() const {
 
 // HP: −5/s por necessidade no crítico (fome 0, sede 0, frio < 4°).
 double Mundo::taxa_hp(const Npc& n) const {
+    // Dentro do abrigo: nada é crítico (nem frio, nem fome, nem sede) e o
+    // HP se recupera 1 por segundo, até 100.
+    if (n.dentro_abrigo >= 0)
+        return n.hp < cfg::HP_MAXIMO ? cfg::HP_RECUPERA_ABRIGO_S : 0.0;
     int criticos = 0;
     if (n.fome <= cfg::FOME_MINIMA) ++criticos;
     if (n.sede <= cfg::SEDE_MINIMA) ++criticos;
@@ -972,6 +1375,31 @@ std::vector<std::uint8_t> Mundo::visao(int z) const {
             r[indice({x, y})] = b;
         }
     return r;
+}
+
+void Mundo::teste_npc(int id, double fome, double sede, double hp) {
+    npcs_[id].fome = fome;
+    npcs_[id].sede = sede;
+    npcs_[id].hp = hp;
+}
+
+void Mundo::teste_dar(int id, int lascas, int galhos, int lenha, bool machado) {
+    npcs_[id].lascas = lascas;
+    npcs_[id].galhos = galhos;
+    npcs_[id].lenha = lenha;
+    npcs_[id].machado = machado;
+}
+
+// Só para testes: põe o NPC numa célula livre (fora do abrigo).
+bool Mundo::teste_mover(int id, int x, int y) {
+    Npc& n = npcs_[id];
+    Pos p{x, y};
+    if (n.dentro_abrigo >= 0 || !livre(p)) return false;
+    ocupar(indice(n.pos), Ocupante::Nada);
+    n.pos = com_z(p);
+    ocupar(indice(n.pos), Ocupante::Npc);
+    n.tem_destino = false;
+    return true;
 }
 
 void Mundo::teste_definir(int x, int y, int z, Material m, int nivel_agua) {

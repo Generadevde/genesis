@@ -73,4 +73,4 @@ Rodar os testes:
 
 ## Estado atual (14/11/2026)
 
-Motor 0.7: vida vegetal — ver [VIDA_VEGETAL.md](VIDA_VEGETAL.md); tempo em [TEMPO.md](TEMPO.md); nomes e carregar maçã — ver [CARREGAR.md](CARREGAR.md); mundo em 3D — ver [MUNDO_3D.md](MUNDO_3D.md); a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).
+Motor 0.10: pedra, ferramentas e abrigo — ver [ABRIGO.md](ABRIGO.md); explorar em [EXPLORAR.md](EXPLORAR.md); HP e temperatura em [HP_TEMPERATURA.md](HP_TEMPERATURA.md); vida vegetal — ver [VIDA_VEGETAL.md](VIDA_VEGETAL.md); tempo em [TEMPO.md](TEMPO.md); nomes e carregar maçã — ver [CARREGAR.md](CARREGAR.md); mundo em 3D — ver [MUNDO_3D.md](MUNDO_3D.md); a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).
