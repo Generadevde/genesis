@@ -13,7 +13,7 @@ Definida pelo dono do projeto em 14/11/2026.
 
 ## Versões (decididas em 14/11/2026)
 
-- **Python 3.12** (o que já vem no Mint; antes cogitado o 3.13)
+- **Python 3.12** (já instalado no Mint do dono do projeto, confirmado; antes cogitado o 3.13)
 - **C++20**
 
 ## Plataforma
@@ -33,6 +33,3 @@ separada da simulação: trocar a tela não pode exigir mexer no motor.
 - O **pybind11** é a única porta entre os dois.
 - O **SQLite** guarda o estado e a história do mundo.
 
-## Em aberto
-
-- Versão exata do Mint.
