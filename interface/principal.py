@@ -7,6 +7,7 @@ O que este arquivo faz:
        de verdade, e desenha no terminal o pedaço da ilha que cabe na tela.
     3. As SETAS do teclado movem a câmera (a vista) pelo mapa;
        + e - mudam o zoom (0,5x, 1x, 2x, 4x, 6x).
+    4. A tecla I abre/fecha a tela da tabela dos NPCs.
 
 Regra da STACK.md: a interface só MOSTRA e CONTROLA. Nenhuma regra da
 simulação mora aqui (fome, maçãs, passos... tudo isso está no motor, em C++).
@@ -26,6 +27,7 @@ from pathlib import Path
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.table import Table
 from rich.text import Text
 
 # O módulo compilado fica na pasta build/ na raiz do projeto.
@@ -56,6 +58,8 @@ NOME_ESTADO = {
     gm.EstadoNpc.INDO_COMER: "indo comer",
     gm.EstadoNpc.COMENDO: "comendo",
     gm.EstadoNpc.MORTO: "morto",
+    gm.EstadoNpc.INDO_BEBER: "indo beber",
+    gm.EstadoNpc.BEBENDO: "bebendo",
 }
 
 GRAMA_BYTE = int(gm.Terreno.GRAMA)
@@ -179,12 +183,25 @@ class Tela:
         partes = [f"⏱ {segundos // 60:02d}:{segundos % 60:02d}",
                   f"🍎 {len(self.mundo.macas())}"]
         for n in self.mundo.npcs():
-            partes.append(f"🗿{n.id + 1} {n.fome:.0f} {NOME_ESTADO[n.estado]}")
+            partes.append(f"🗿{n.id + 1} fome {n.fome:.0f} sede {n.sede:.0f}")
         zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
         partes.append(f"câmera ({self.cam_x},{self.cam_y}) zoom {zoom}"
-                      "  setas: mover  +/-: zoom  q: sair")
+                      "  setas: mover  +/-: zoom  I: tabela  q: sair")
         return Text("  ".join(partes), style="bold", no_wrap=True,
                     overflow="crop")
+
+    def tabela(self) -> Group:
+        """Tela separada (tecla I): uma linha por NPC."""
+        t = Table(title="NPCs  (I: voltar ao mapa)", header_style="bold")
+        t.add_column("NPC")
+        t.add_column("Fome", justify="right")
+        t.add_column("Sede", justify="right")
+        t.add_column("Estado")
+        t.add_column("Posição", justify="right")
+        for n in self.mundo.npcs():
+            t.add_row(f"🗿{n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
+                      NOME_ESTADO[n.estado], f"({n.pos.x}, {n.pos.y})")
+        return Group(self.status(), t)
 
     def _codigo_celula(self, ocupacao: bytes, x: int, y: int) -> int:
         i = y * self.largura + x
@@ -267,17 +284,21 @@ def main() -> None:
                   vertical_overflow="crop") as live:
             ultimo = time.monotonic()
             proximo_quadro = ultimo
+            na_tabela = False  # tecla I alterna entre mapa e tabela
             while True:
                 agora = time.monotonic()
                 mundo.avancar(agora - ultimo)  # tempo real
                 ultimo = agora
-                live.update(tela.quadro(console), refresh=True)
+                imagem = tela.tabela() if na_tabela else tela.quadro(console)
+                live.update(imagem, refresh=True)
                 if agora >= proximo_quadro:
                     proximo_quadro = agora + intervalo
 
                 teclas = ler_teclas(fd, proximo_quadro - time.monotonic())
                 if b"q" in teclas:
                     break
+                for _ in range(teclas.count(b"i") + teclas.count(b"I")):
+                    na_tabela = not na_tabela
                 for seq, (dx, dy) in SETAS.items():
                     for _ in range(teclas.count(seq)):
                         tela.mover(dx, dy)

@@ -4,8 +4,9 @@
 // Como o tempo funciona (simulação por EVENTOS):
 //   Cada coisa que acontece de tempos em tempos tem um "relógio" que conta
 //   quanto falta para o próximo acontecimento:
-//     - cada NPC: próximo passo (1 s), próxima queda de fome (5 s) e, se
-//       estiver comendo, quanto falta para terminar (10 s);
+//     - cada NPC: próximo passo (1 s), próxima queda de fome (5 s),
+//       próxima queda de sede (5 s) e, se estiver comendo ou bebendo,
+//       quanto falta para terminar (10 s);
 //     - cada macieira: quanto falta para a próxima maçã cair (30 a 60 s).
 //   avancar(dt) anda o tempo `dt` segundos, disparando os acontecimentos na
 //   ordem certa em que vencem. Assim não existe "passo interno" inventado:
@@ -42,7 +43,9 @@ enum class EstadoNpc : std::uint8_t {
     Vagando = 0,   // andando aleatoriamente
     IndoComer,     // com fome < 70 e viu uma maçã: indo até ela
     Comendo,       // parado ao lado da maçã, comendo (10 s)
-    Morto          // fome chegou a 0; o corpo fica no mapa
+    Morto,         // fome ou sede chegou a 0; o corpo fica no mapa
+    IndoBeber,     // com sede < 50 e viu água: indo até ela
+    Bebendo        // parado ao lado da água, bebendo (10 s)
 };
 
 struct Macieira {
@@ -56,11 +59,13 @@ struct Npc {
     Pos anterior;              // de onde veio no último passo
     bool tem_anterior = false; // falso até dar o primeiro passo
     double fome = 0.0;
+    double sede = 0.0;
     double falta_passo = 0.0;  // segundos até o próximo passo
     double falta_fome = 0.0;   // segundos até a próxima queda de fome
-    double falta_comer = 0.0;  // segundos até terminar de comer
+    double falta_sede = 0.0;   // segundos até a próxima queda de sede
+    double falta_acao = 0.0;   // segundos até terminar de comer/beber
     EstadoNpc estado = EstadoNpc::Vagando;
-    Pos alvo;                  // maçã que está indo comer / comendo
+    Pos alvo;                  // maçã ou célula de água do alvo atual
     bool tem_alvo = false;
 };
 
@@ -94,8 +99,10 @@ private:
 
     // --- Acontecimentos ---------------------------------------------------
     void evento_fome(Npc& n);
+    void evento_sede(Npc& n);
     void evento_passo(Npc& n);
     void evento_fim_comer(Npc& n);
+    void evento_fim_beber(Npc& n);
     void evento_queda_maca(Macieira& m);
 
     // --- Ajudantes --------------------------------------------------------
@@ -104,6 +111,10 @@ private:
     bool livre(Pos p) const;   // grama e sem ocupante
     bool maca_reservada(Pos p, int por_quem_nao) const;
     bool procurar_maca(const Npc& n, Pos& achada) const;
+    bool procurar_agua(const Npc& n, Pos& achada) const;
+    bool tentar_comer(Npc& n);
+    bool tentar_beber(Npc& n);
+    void passo_em_direcao(Npc& n, Pos alvo);
     void mover(Npc& n, Pos destino);
     void morrer(Npc& n);
     double sortear_queda();

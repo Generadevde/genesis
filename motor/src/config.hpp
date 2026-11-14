@@ -31,6 +31,20 @@ inline constexpr double FOME_QUEDA       = 3.0;
 // O NPC só come quando a fome está abaixo de 70.
 inline constexpr double FOME_LIMITE_COMER = 70.0;
 
+// --- Sede (pedida em 14/11/2026) -----------------------------------------
+// Igual à fome: vai de 0 a 100, começa em 100, em 0 o NPC morre.
+inline constexpr double SEDE_MAXIMA  = 100.0;
+inline constexpr double SEDE_MINIMA  = 0.0;
+inline constexpr double SEDE_INICIAL = 100.0;
+// A cada 5 segundos, a sede abaixa 4.
+inline constexpr double SEDE_INTERVALO_S = 5.0;
+inline constexpr double SEDE_QUEDA       = 4.0;
+// Abaixo de 50 o NPC tenta beber água (do mar mesmo).
+inline constexpr double SEDE_LIMITE_BEBER = 50.0;
+// Um gole recupera 15 e demora 10 s.
+inline constexpr double GOLE_RECUPERA   = 15.0;
+inline constexpr double BEBER_DURACAO_S = 10.0;
+
 // --- Maçãs e macieiras ----------------------------------------------------
 // Cada maçã recupera 12 de fome.
 inline constexpr double MACA_RECUPERA = 12.0;
@@ -43,7 +57,7 @@ inline constexpr double COMER_DURACAO_S = 10.0;
 // --- NPC ------------------------------------------------------------------
 // Anda 1 célula por segundo -> 1 passo a cada 1 s.
 inline constexpr double NPC_PASSO_S = 1.0;
-// Enxerga maçãs numa área de 32 x 32 células em volta dele.
+// Enxerga maçãs e água numa área de 32 x 32 células em volta dele.
 inline constexpr int VISAO_LADO = 32;
 
 }  // namespace genesis::config

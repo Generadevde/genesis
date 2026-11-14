@@ -54,14 +54,16 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
         macieiras_.push_back(m);
     }
 
-    // 4 NPCs em células de grama livres, com fome inicial 100.
+    // 4 NPCs em células de grama livres, com fome e sede iniciais 100.
     for (int i = 0; i < cfg::NUM_NPCS; ++i) {
         Npc n;
         n.id = i;
         n.pos = sortear_grama_livre();
         n.fome = cfg::FOME_INICIAL;
+        n.sede = cfg::SEDE_INICIAL;
         n.falta_passo = cfg::NPC_PASSO_S;
         n.falta_fome = cfg::FOME_INTERVALO_S;
+        n.falta_sede = cfg::SEDE_INTERVALO_S;
         ocupacao_[indice(n.pos)] = Ocupante::Npc;
         npcs_.push_back(n);
     }
@@ -104,9 +106,10 @@ void Mundo::avancar(double dt) {
         double proximo = std::numeric_limits<double>::infinity();
         for (const Npc& n : npcs_) {
             if (n.estado == EstadoNpc::Morto) continue;
-            proximo = std::min({proximo, n.falta_fome, n.falta_passo});
-            if (n.estado == EstadoNpc::Comendo)
-                proximo = std::min(proximo, n.falta_comer);
+            proximo = std::min({proximo, n.falta_fome, n.falta_sede,
+                                n.falta_passo});
+            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
+                proximo = std::min(proximo, n.falta_acao);
         }
         for (const Macieira& m : macieiras_)
             proximo = std::min(proximo, m.falta_queda);
@@ -118,8 +121,10 @@ void Mundo::avancar(double dt) {
         for (Npc& n : npcs_) {
             if (n.estado == EstadoNpc::Morto) continue;
             n.falta_fome -= passo;
+            n.falta_sede -= passo;
             n.falta_passo -= passo;
-            if (n.estado == EstadoNpc::Comendo) n.falta_comer -= passo;
+            if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
+                n.falta_acao -= passo;
         }
         for (Macieira& m : macieiras_) m.falta_queda -= passo;
 
@@ -129,8 +134,14 @@ void Mundo::avancar(double dt) {
                 n.falta_fome += cfg::FOME_INTERVALO_S;
                 evento_fome(n);
             }
-            if (n.estado == EstadoNpc::Comendo && n.falta_comer <= EPS)
+            if (n.estado != EstadoNpc::Morto && n.falta_sede <= EPS) {
+                n.falta_sede += cfg::SEDE_INTERVALO_S;
+                evento_sede(n);
+            }
+            if (n.estado == EstadoNpc::Comendo && n.falta_acao <= EPS)
                 evento_fim_comer(n);
+            if (n.estado == EstadoNpc::Bebendo && n.falta_acao <= EPS)
+                evento_fim_beber(n);
             if (n.estado != EstadoNpc::Morto && n.falta_passo <= EPS) {
                 n.falta_passo += cfg::NPC_PASSO_S;
                 evento_passo(n);
@@ -150,7 +161,9 @@ void Mundo::avancar(double dt) {
 // ===========================================================================
 
 // A cada 5 s: fome abaixa 3. Chegou a 0 -> morre.
+// Enquanto está comendo, a fome NÃO abaixa (pedido do dono do projeto).
 void Mundo::evento_fome(Npc& n) {
+    if (n.estado == EstadoNpc::Comendo) return;
     n.fome -= cfg::FOME_QUEDA;
     if (n.fome <= cfg::FOME_MINIMA) {
         n.fome = cfg::FOME_MINIMA;
@@ -158,47 +171,44 @@ void Mundo::evento_fome(Npc& n) {
     }
 }
 
+// A cada 5 s: sede abaixa 4. Chegou a 0 -> morre.
+// Enquanto está bebendo, a sede NÃO abaixa.
+void Mundo::evento_sede(Npc& n) {
+    if (n.estado == EstadoNpc::Bebendo) return;
+    n.sede -= cfg::SEDE_QUEDA;
+    if (n.sede <= cfg::SEDE_MINIMA) {
+        n.sede = cfg::SEDE_MINIMA;
+        morrer(n);
+    }
+}
+
 // A cada 1 s: o NPC decide e dá (no máximo) um passo.
+//
+// Ordem de decisão (definida pelo dono do projeto):
+//   - Com fome < 70 e sede < 50 ao mesmo tempo: tenta primeiro a MAIS BAIXA.
+//     Se não achar o que ela pede (ex.: nenhuma água à vista), tenta a outra.
+//   - Só uma baixa: tenta só ela.
+//   - Nada à vista (ou nada baixo): anda aleatoriamente.
+// Empate (fome == sede): a sede vem primeiro — PROVISÓRIO, aguardando o dono.
 void Mundo::evento_passo(Npc& n) {
-    if (n.estado == EstadoNpc::Comendo) return;  // comendo fica parado
+    if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
+        return;  // ocupado: fica parado
 
-    // --- Com fome (< 70): procura a maçã mais próxima que enxerga --------
-    Pos maca;
-    if (n.fome < cfg::FOME_LIMITE_COMER && procurar_maca(n, maca)) {
-        n.estado = EstadoNpc::IndoComer;
-        n.alvo = maca;
-        n.tem_alvo = true;
-
-        // Já está ao lado da maçã? Começa a comer (a maçã ocupa a célula
-        // dela, então o NPC come de uma célula vizinha).
-        if (distancia_passos(n.pos, maca) == 1) {
-            reservas_[indice(maca)] = n.id;
-            n.estado = EstadoNpc::Comendo;
-            n.falta_comer = cfg::COMER_DURACAO_S;
-            return;
+    const bool com_fome = n.fome < cfg::FOME_LIMITE_COMER;
+    const bool com_sede = n.sede < cfg::SEDE_LIMITE_BEBER;
+    if (com_fome && com_sede) {
+        if (n.sede <= n.fome) {
+            if (tentar_beber(n) || tentar_comer(n)) return;
+        } else {
+            if (tentar_comer(n) || tentar_beber(n)) return;
         }
-
-        // Senão, dá um passo para a vizinha livre que mais aproxima da maçã.
-        bool achou = false;
-        Pos melhor{};
-        int melhor_passos = 0, melhor_d2 = 0;
-        for (Pos v : VIZINHOS) {
-            Pos p{n.pos.x + v.x, n.pos.y + v.y};
-            if (!livre(p)) continue;
-            const int ps = distancia_passos(p, maca), d2 = distancia2(p, maca);
-            if (!achou || ps < melhor_passos ||
-                (ps == melhor_passos && d2 < melhor_d2)) {
-                achou = true;
-                melhor = p;
-                melhor_passos = ps;
-                melhor_d2 = d2;
-            }
-        }
-        if (achou) mover(n, melhor);
-        return;  // sem vizinha livre: espera o próximo passo
+    } else if (com_fome) {
+        if (tentar_comer(n)) return;
+    } else if (com_sede) {
+        if (tentar_beber(n)) return;
     }
 
-    // --- Sem fome, ou nenhuma maçã à vista: anda aleatoriamente ----------
+    // --- Nada a resolver, ou nada à vista: anda aleatoriamente ----------
     // Regra: não volta para a célula de onde acabou de sair.
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
@@ -218,12 +228,76 @@ void Mundo::evento_passo(Npc& n) {
     mover(n, opcoes[d(rng_)]);
 }
 
+// Procura a maçã mais próxima à vista. Se está ao lado, começa a comer;
+// senão, dá um passo na direção dela. Devolve falso se não viu maçã.
+bool Mundo::tentar_comer(Npc& n) {
+    Pos maca;
+    if (!procurar_maca(n, maca)) return false;
+    n.estado = EstadoNpc::IndoComer;
+    n.alvo = maca;
+    n.tem_alvo = true;
+    // A maçã ocupa a célula dela, então o NPC come de uma célula vizinha.
+    if (distancia_passos(n.pos, maca) == 1) {
+        reservas_[indice(maca)] = n.id;
+        n.estado = EstadoNpc::Comendo;
+        n.falta_acao = cfg::COMER_DURACAO_S;
+        return true;
+    }
+    passo_em_direcao(n, maca);
+    return true;
+}
+
+// Igual ao comer, mas com água: o NPC não entra na água, bebe da célula
+// de grama vizinha. A água não acaba e não é reservada.
+bool Mundo::tentar_beber(Npc& n) {
+    Pos agua;
+    if (!procurar_agua(n, agua)) return false;
+    n.estado = EstadoNpc::IndoBeber;
+    n.alvo = agua;
+    n.tem_alvo = true;
+    if (distancia_passos(n.pos, agua) == 1) {
+        n.estado = EstadoNpc::Bebendo;
+        n.falta_acao = cfg::BEBER_DURACAO_S;
+        return true;
+    }
+    passo_em_direcao(n, agua);
+    return true;
+}
+
+// Um passo para a vizinha livre que mais aproxima do alvo.
+// Sem vizinha livre: fica parado e tenta de novo no próximo passo.
+void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
+    bool achou = false;
+    Pos melhor{};
+    int melhor_passos = 0, melhor_d2 = 0;
+    for (Pos v : VIZINHOS) {
+        Pos p{n.pos.x + v.x, n.pos.y + v.y};
+        if (!livre(p)) continue;
+        const int ps = distancia_passos(p, alvo), d2 = distancia2(p, alvo);
+        if (!achou || ps < melhor_passos ||
+            (ps == melhor_passos && d2 < melhor_d2)) {
+            achou = true;
+            melhor = p;
+            melhor_passos = ps;
+            melhor_d2 = d2;
+        }
+    }
+    if (achou) mover(n, melhor);
+}
+
 // Terminou os 10 s comendo: a maçã some e a fome sobe 12 (até 100).
 void Mundo::evento_fim_comer(Npc& n) {
     const int i = indice(n.alvo);
     ocupacao_[i] = Ocupante::Nada;
     reservas_.erase(i);
     n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
+    n.estado = EstadoNpc::Vagando;
+    n.tem_alvo = false;
+}
+
+// Terminou os 10 s bebendo: a sede sobe 15 (até 100). A água não acaba.
+void Mundo::evento_fim_beber(Npc& n) {
+    n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::GOLE_RECUPERA);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
 }
@@ -300,6 +374,35 @@ bool Mundo::procurar_maca(const Npc& n, Pos& achada) const {
     return achou;
 }
 
+// Procura a célula de água mais próxima na mesma área de visão (32 x 32).
+// Só conta água que tenha ao lado uma célula de onde dá para beber: grama
+// livre, ou a própria célula onde o NPC já está.
+bool Mundo::procurar_agua(const Npc& n, Pos& achada) const {
+    const int metade = cfg::VISAO_LADO / 2;
+    bool achou = false;
+    int melhor_passos = 0, melhor_d2 = 0;
+    for (int dy = -metade; dy < metade; ++dy)
+        for (int dx = -metade; dx < metade; ++dx) {
+            Pos p{n.pos.x + dx, n.pos.y + dy};
+            if (!dentro(p) || terreno_[indice(p)] != Terreno::Agua) continue;
+            bool da_para_beber = false;
+            for (Pos v : VIZINHOS) {
+                Pos q{p.x + v.x, p.y + v.y};
+                if (q == n.pos || livre(q)) { da_para_beber = true; break; }
+            }
+            if (!da_para_beber) continue;
+            const int ps = distancia_passos(n.pos, p), d2 = distancia2(n.pos, p);
+            if (!achou || ps < melhor_passos ||
+                (ps == melhor_passos && d2 < melhor_d2)) {
+                achou = true;
+                achada = p;
+                melhor_passos = ps;
+                melhor_d2 = d2;
+            }
+        }
+    return achou;
+}
+
 void Mundo::mover(Npc& n, Pos destino) {
     ocupacao_[indice(n.pos)] = Ocupante::Nada;
     n.anterior = n.pos;
@@ -308,8 +411,8 @@ void Mundo::mover(Npc& n, Pos destino) {
     ocupacao_[indice(n.pos)] = Ocupante::Npc;
 }
 
-// Morre: o corpo fica no mapa ocupando a célula. Se estava comendo, larga
-// a maçã (ela continua lá para outro NPC).
+// Morre (de fome ou de sede): o corpo fica no mapa ocupando a célula.
+// Se estava comendo, larga a maçã (ela continua lá para outro NPC).
 void Mundo::morrer(Npc& n) {
     if (n.estado == EstadoNpc::Comendo) reservas_.erase(indice(n.alvo));
     n.estado = EstadoNpc::Morto;

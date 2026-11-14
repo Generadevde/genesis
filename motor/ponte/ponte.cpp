@@ -50,7 +50,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("VAGANDO", EstadoNpc::Vagando)
         .value("INDO_COMER", EstadoNpc::IndoComer)
         .value("COMENDO", EstadoNpc::Comendo)
-        .value("MORTO", EstadoNpc::Morto);
+        .value("MORTO", EstadoNpc::Morto)
+        .value("INDO_BEBER", EstadoNpc::IndoBeber)
+        .value("BEBENDO", EstadoNpc::Bebendo);
 
     py::class_<Macieira>(m, "Macieira")
         .def_readonly("pos", &Macieira::pos)
@@ -60,8 +62,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("id", &Npc::id)
         .def_readonly("pos", &Npc::pos)
         .def_readonly("fome", &Npc::fome)
+        .def_readonly("sede", &Npc::sede)
         .def_readonly("estado", &Npc::estado)
-        .def_readonly("falta_comer", &Npc::falta_comer);
+        .def_readonly("falta_acao", &Npc::falta_acao);
 
     py::class_<Mundo>(m, "Mundo")
         .def(py::init<std::uint64_t>(), py::arg("semente"))

@@ -46,7 +46,7 @@ cd genesis
 ./genesis
 ```
 
-Setas do teclado: movem a câmera. **+** / **-**: zoom. Sair: **q** ou **Ctrl+C**.
+Setas do teclado: movem a câmera. **+** / **-**: zoom. **I**: tabela dos NPCs. Sair: **q** ou **Ctrl+C**.
 
 Para atualizar depois:
 
@@ -67,4 +67,4 @@ Rodar os testes:
 
 ## Estado atual (14/11/2026)
 
-Motor 0.1: a ilha — ver [ILHA_V1.md](ILHA_V1.md).
+Motor 0.2: a ilha com fome e sede — ver [ILHA_V1.md](ILHA_V1.md).
