@@ -22,6 +22,9 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
     cada toque na seta anda 1 célula da tela (ex.: 4 células do mapa em 4x).
 - **Tabela dos NPCs** (pedida em 14/11/2026): tela separada, abre e fecha
   com a tecla **I**. Colunas: NPC, Fome, Sede, Estado, Posição.
+- **O mapa ocupa a tela toda**, sem linha de status em cima (pedido em
+  14/11/2026). Tempo, maçãs no chão, câmera, zoom e teclas aparecem em cima
+  da tabela.
 
 ### Mapa
 - **128 × 128** células, quadrado (por enquanto). Era 512 × 512: a tela do

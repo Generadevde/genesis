@@ -146,9 +146,9 @@ class Tela:
         return ESCALAS[self.nivel]
 
     def vista(self, console: Console) -> tuple[int, int]:
-        """Quantas células DO MAPA cabem na tela (1 linha fica para o status)."""
+        """Quantas células DO MAPA cabem na tela (o mapa usa a tela toda)."""
         colunas_tela = max(1, console.width // COLUNAS_POR_CELULA)
-        linhas_tela = max(1, console.height - 1)
+        linhas_tela = max(1, console.height)
         mapa_l = max(1, min(int(colunas_tela * self.escala), self.largura))
         mapa_a = max(1, min(int(linhas_tela * self.escala), self.altura))
         return mapa_l, mapa_a
@@ -178,17 +178,14 @@ class Tela:
         self.limitar(vl, va)
 
     def status(self) -> Text:
-        """Linha de cima: tempo, maçãs no chão, NPCs, câmera e zoom."""
+        """Resumo (mostrado na tela da tabela): tempo, maçãs, câmera, zoom."""
         segundos = int(self.mundo.tempo)
         partes = [f"⏱ {segundos // 60:02d}:{segundos % 60:02d}",
                   f"🍎 {len(self.mundo.macas())}"]
-        for n in self.mundo.npcs():
-            partes.append(f"🗿{n.id + 1} fome {n.fome:.0f} sede {n.sede:.0f}")
         zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
         partes.append(f"câmera ({self.cam_x},{self.cam_y}) zoom {zoom}"
                       "  setas: mover  +/-: zoom  I: tabela  q: sair")
-        return Text("  ".join(partes), style="bold", no_wrap=True,
-                    overflow="crop")
+        return Text("  ".join(partes), style="bold")
 
     def tabela(self) -> Group:
         """Tela separada (tecla I): uma linha por NPC."""
@@ -254,7 +251,8 @@ class Tela:
                 codigos = [self._codigo_bloco(ocupacao, x, y, lado)
                            for x in range(cx, cx + vis_l, lado)]
                 linhas.append(texto_da_linha(codigos))
-        return Group(self.status(), *linhas)
+        # Sem linha de status: o mapa ocupa a tela toda (pedido do dono).
+        return Group(*linhas)
 
 
 def ler_teclas(fd: int, espera: float) -> bytes:
