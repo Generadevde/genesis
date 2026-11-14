@@ -52,9 +52,12 @@ Para atualizar depois:
 
 ```bash
 git pull
-./instalar.sh     # recompila o C++
 ./genesis
 ```
+
+O `./genesis` confere sozinho se o código do motor (C++) mudou desde a
+última compilação e, se mudou, recompila antes de abrir. O `./instalar.sh`
+só precisa ser rodado de novo se o ambiente Python for apagado.
 
 Rodar os testes:
 

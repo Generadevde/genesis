@@ -3,6 +3,10 @@
 # genesis — o executável do Genesis. Abre direto na simulação, sem menus.
 #
 # Usa o Python do ambiente do projeto (.venv/) criado pelo instalar.sh.
+#
+# Se o código do motor (C++) mudou depois da última compilação — por
+# exemplo, depois de um `git pull` — recompila sozinho antes de abrir.
+# Assim nunca roda um motor velho com código novo.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -10,6 +14,13 @@ cd "$(dirname "$0")"
 if [ ! -x .venv/bin/python ] || ! ls build/genesis_motor*.so >/dev/null 2>&1; then
     echo "O Genesis ainda não foi instalado. Rode primeiro: ./instalar.sh"
     exit 1
+fi
+
+MODULO="$(ls build/genesis_motor*.so | head -n 1)"
+# Algum arquivo do motor ou da receita de compilação é mais novo que o módulo?
+if [ -n "$(find motor CMakeLists.txt -newer "$MODULO" -type f | head -n 1)" ]; then
+    echo "O motor mudou. Recompilando..."
+    cmake --build build -j
 fi
 
 exec .venv/bin/python interface/principal.py "$@"
