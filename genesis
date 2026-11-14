@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# genesis — o executável do Genesis. Abre direto na simulação, sem menus.
+#
+# Usa o Python do ambiente do projeto (.venv/) criado pelo instalar.sh.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+cd "$(dirname "$0")"
+
+if [ ! -x .venv/bin/python ] || ! ls build/genesis_motor*.so >/dev/null 2>&1; then
+    echo "O Genesis ainda não foi instalado. Rode primeiro: ./instalar.sh"
+    exit 1
+fi
+
+exec .venv/bin/python interface/principal.py "$@"

@@ -1,0 +1,4 @@
+# Gerados localmente pelo instalar.sh — não vão para o repositório.
+.venv/
+build/
+__pycache__/
