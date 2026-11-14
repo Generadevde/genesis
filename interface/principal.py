@@ -190,11 +190,15 @@ class Genesis:
     # ------------------------------------------------------------------
     def _maximizar(self) -> None:
         """Pede ao sistema para maximizar a janela (pedido do dono)."""
+        # IMPORTANTE: o objeto Window precisa ficar guardado (self._janela).
+        # Se ele for descartado, o pygame destrói a janela junto, e o próximo
+        # desenho derruba o programa (falha de segmentação).
         try:
             from pygame._sdl2.video import Window
-            Window.from_display_module().maximize()
+            self._janela = Window.from_display_module()
+            self._janela.maximize()
         except Exception:
-            pass  # sem maximizar: a janela já abre do tamanho da tela
+            self._janela = None  # sem maximizar: a janela já abre do tamanho da tela
 
     # ------------------------------------------------------------------
     # Ações do menu
@@ -440,6 +444,10 @@ class Genesis:
             x += w + 2
 
     def desenhar(self) -> None:
+        # Pega a superfície ATUAL da janela. Quando a janela é maximizada ou
+        # muda de tamanho, o pygame troca a superfície por uma nova; desenhar
+        # na antiga (já descartada) derruba o programa (falha de segmentação).
+        self.tela = pygame.display.get_surface()
         self.tela.fill(A.CINZA)
         conteudo, painel, status, abas_y = self.layout()
         self.menu.desenhar(self.tela, self.tela.get_width())

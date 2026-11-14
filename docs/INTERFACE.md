@@ -75,6 +75,15 @@ A fonte Noto Color Emoji (vem com o Mint) só existe num tamanho; a interface
 desenha o emoji nele e redimensiona para o tamanho da célula, guardando o
 resultado para não refazer a cada quadro (`Simbolos` em `principal.py`).
 
+### Janela maximizada (cuidado!)
+Para maximizar, a interface usa o objeto `Window` do pygame. Esse objeto
+**precisa ficar guardado** (`self._janela`): se o Python o descartar, o
+pygame destrói a janela junto e o programa cai com "falha de segmentação"
+(aconteceu em 14/11/2026). A cada quadro a interface também pega a
+superfície atual da janela (`pygame.display.get_surface()`), porque ela
+muda quando a janela muda de tamanho. O `testes/teste_interface.py`
+confere isso.
+
 ### Tempo real
 A cada quadro, o pygame mede quanto tempo passou e o motor anda exatamente
 isso (`mundo.avancar(dt)`). 60 quadros por segundo = taxa do monitor do dono.

@@ -23,7 +23,8 @@ genesis/
 │   ├── win98.py         ← peças de desenho: relevo, menu, abas, tabela
 │   └── aparencia.py     ← todas as cores e tamanhos
 ├── testes/
-│   └── teste_ilha.py    ← confere as regras da ilha sem tela
+│   ├── teste_ilha.py    ← confere as regras da simulação sem tela
+│   └── teste_interface.py ← abre a interface sem tela e desenha vários quadros
 └── docs/                ← documentação de tudo
 ```
 
@@ -68,6 +69,7 @@ Rodar os testes:
 
 ```bash
 .venv/bin/python testes/teste_ilha.py
+.venv/bin/python testes/teste_interface.py
 ```
 
 ## Estado atual (14/11/2026)
