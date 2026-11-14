@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.3: memória de lugares (docs/MEMORIA.md).
-    return "Genesis — motor 0.3 (memória)";
+    // Versão 0.4: mundo em 3D (docs/MUNDO_3D.md).
+    return "Genesis — motor 0.4 (mundo 3D)";
 }
 
 }  // namespace genesis

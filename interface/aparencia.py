@@ -29,6 +29,9 @@ FUNDO_MAPA = PRETO
 COR_GRAMA = (0, 128, 0)        # verde
 COR_AGUA = (0, 0, 255)         # azul
 COR_CRUZ = BRANCO              # corpo do NPC morto (✝)
+# Terra "d" marrom e pedra "p" cinza (pedido do dono do projeto).
+COR_TERRA = (170, 85, 0)       # PROVISÓRIO: o marrom clássico das telas de 16 cores
+COR_PEDRA = CINZA              # cinza do Windows 98 (#C0C0C0)
 
 # ---------------------------------------------------------------------------
 # Fontes do sistema (vêm com o Linux Mint)
@@ -53,6 +56,9 @@ TAM_CELULA = 24            # PROVISÓRIO: lado de 1 célula do mapa, em pixels (
 LARGURA_PAINEL = 280       # PROVISÓRIO: painel da direita (seleção)
 TAM_SIMBOLO_GRANDE = 128   # PROVISÓRIO: símbolo grande no painel da direita
 ESPACO = 6                 # PROVISÓRIO: folga interna de barras, abas e células da tabela
+# O que está abaixo do nível visto aparece "desfocado": as cores são
+# multiplicadas por este número (0 = preto, 1 = cor normal).
+FATOR_APAGADO = 0.45       # PROVISÓRIO
 # Segurar uma seta: espera antes de repetir e intervalo entre repetições (ms).
 REPETIR_TECLA_ESPERA_MS = 300     # PROVISÓRIO
 REPETIR_TECLA_INTERVALO_MS = 50   # PROVISÓRIO

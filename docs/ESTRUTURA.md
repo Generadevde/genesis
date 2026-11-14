@@ -10,6 +10,8 @@ genesis/
 ├── motor/
 │   ├── src/             ← o MOTOR de simulação, em C++20. Não sabe nada de tela.
 │   │   ├── config.hpp   ← TODOS os números da simulação, num lugar só
+│   │   ├── mapa3d.hpp/.cpp  ← o volume (x, y, z): materiais + física da água
+│   │   ├── gerador.hpp/.cpp ← o gerador de mundos (relevo e camadas)
 │   │   ├── mundo.hpp    ← o mundo: ilha, macieiras, maçãs, NPCs (declaração)
 │   │   ├── mundo.cpp    ← o mundo: as regras (implementação)
 │   │   ├── motor.hpp
@@ -70,4 +72,4 @@ Rodar os testes:
 
 ## Estado atual (14/11/2026)
 
-Motor 0.3: a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).
+Motor 0.4: mundo em 3D — ver [MUNDO_3D.md](MUNDO_3D.md); a ilha com fome, sede e memória — ver [ILHA_V1.md](ILHA_V1.md).

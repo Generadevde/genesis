@@ -8,6 +8,7 @@
 #include <limits>
 
 #include "config.hpp"
+#include "gerador.hpp"
 
 namespace genesis {
 
@@ -42,9 +43,11 @@ constexpr Pos VIZINHOS[8] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
 // ===========================================================================
 
 Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
-    gerar_terreno();
-    ocupacao_.assign(terreno_.size(), Ocupante::Nada);
-    origem_maca_.assign(terreno_.size(), -1);
+    gerar_mundo(mapa_, semente);
+    const size_t colunas = static_cast<size_t>(largura()) * altura();
+    ocupacao_.assign(colunas, Ocupante::Nada);
+    origem_maca_.assign(colunas, -1);
+    falta_agua_ = cfg::AGUA_INTERVALO_S;
 
     // 6 macieiras em células de grama livres, sorteadas ("espalhadas").
     for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) {
@@ -70,14 +73,6 @@ Mundo::Mundo(std::uint64_t semente) : rng_(semente) {
     }
 }
 
-// Ilha quadrada: água nas BORDA_AGUA células de cada borda, grama no meio.
-void Mundo::gerar_terreno() {
-    terreno_.assign(static_cast<size_t>(largura()) * altura(), Terreno::Agua);
-    for (int y = cfg::BORDA_AGUA; y < altura() - cfg::BORDA_AGUA; ++y)
-        for (int x = cfg::BORDA_AGUA; x < largura() - cfg::BORDA_AGUA; ++x)
-            terreno_[indice({x, y})] = Terreno::Grama;
-}
-
 // Sorteia uma célula de grama ainda vazia (só a terra do meio é sorteada).
 Pos Mundo::sortear_grama_livre() {
     std::uniform_int_distribution<int> dx(cfg::BORDA_AGUA,
@@ -86,7 +81,7 @@ Pos Mundo::sortear_grama_livre() {
                                           altura() - cfg::BORDA_AGUA - 1);
     while (true) {
         Pos p{dx(rng_), dy(rng_)};
-        if (livre(p)) return p;
+        if (livre(p)) return com_z(p);
     }
 }
 
@@ -114,6 +109,7 @@ void Mundo::avancar(double dt) {
         }
         for (const Macieira& m : macieiras_)
             proximo = std::min(proximo, m.falta_queda);
+        proximo = std::min(proximo, falta_agua_);
 
         // 2) Anda o relógio até ele (ou até o fim do dt, o que vier antes).
         const double passo = std::min(proximo, restante);
@@ -128,6 +124,7 @@ void Mundo::avancar(double dt) {
                 n.falta_acao -= passo;
         }
         for (Macieira& m : macieiras_) m.falta_queda -= passo;
+        falta_agua_ -= passo;
 
         // 3) Dispara tudo que venceu, em ordem fixa (NPCs, depois macieiras).
         for (Npc& n : npcs_) {
@@ -147,6 +144,11 @@ void Mundo::avancar(double dt) {
                 n.falta_passo += cfg::NPC_PASSO_S;
                 evento_passo(n);
             }
+        }
+        // A cada 3 s: um passo da física da água.
+        if (falta_agua_ <= EPS) {
+            falta_agua_ += cfg::AGUA_INTERVALO_S;
+            mapa_.passo_agua(rng_);
         }
         for (int i = 0; i < static_cast<int>(macieiras_.size()); ++i) {
             Macieira& m = macieiras_[i];
@@ -217,14 +219,14 @@ void Mundo::evento_passo(Npc& n) {
     n.pela_memoria = false;
     std::vector<Pos> opcoes;
     for (Pos v : VIZINHOS) {
-        Pos p{n.pos.x + v.x, n.pos.y + v.y};
-        if (!livre(p)) continue;
+        Pos p = com_z({n.pos.x + v.x, n.pos.y + v.y});
+        if (!pode_pisar(n.pos, p)) continue;
         if (n.tem_anterior && p == n.anterior) continue;
         opcoes.push_back(p);
     }
     if (opcoes.empty()) {
         // Única saída é voltar? Então volta (melhor que ficar preso).
-        if (n.tem_anterior && livre(n.anterior)) mover(n, n.anterior);
+        if (n.tem_anterior && pode_pisar(n.pos, n.anterior)) mover(n, n.anterior);
         return;
     }
     std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
@@ -262,7 +264,10 @@ bool Mundo::tentar_beber(Npc& n) {
     n.alvo = agua;
     n.tem_alvo = true;
     n.pela_memoria = false;
-    if (distancia_passos(n.pos, agua) == 1) {
+    // Bebe da célula vizinha, se a água estiver no nível dele ou até 1 abaixo.
+    const int desnivel = n.pos.z - agua.z;
+    if (distancia_passos(n.pos, agua) == 1 && desnivel >= 0 &&
+        desnivel <= cfg::NPC_DEGRAU_MAX) {
         n.estado = EstadoNpc::Bebendo;
         n.falta_acao = cfg::BEBER_DURACAO_S;
         return true;
@@ -332,8 +337,8 @@ void Mundo::passo_em_direcao(Npc& n, Pos alvo) {
     Pos melhor{};
     int melhor_passos = 0, melhor_d2 = 0;
     for (Pos v : VIZINHOS) {
-        Pos p{n.pos.x + v.x, n.pos.y + v.y};
-        if (!livre(p)) continue;
+        Pos p = com_z({n.pos.x + v.x, n.pos.y + v.y});
+        if (!pode_pisar(n.pos, p)) continue;
         const int ps = distancia_passos(p, alvo), d2 = distancia2(p, alvo);
         if (!achou || ps < melhor_passos ||
             (ps == melhor_passos && d2 < melhor_d2)) {
@@ -387,7 +392,7 @@ void Mundo::evento_queda_maca(int indice_macieira) {
             for (int dx = -r; dx <= r; ++dx) {
                 if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
                 Pos p{m.pos.x + dx, m.pos.y + dy};
-                if (livre(p)) opcoes.push_back(p);
+                if (livre(p)) opcoes.push_back(com_z(p));
             }
         if (!opcoes.empty()) {
             std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
@@ -410,14 +415,25 @@ bool Mundo::dentro(Pos p) const {
     return p.x >= 0 && p.y >= 0 && p.x < largura() && p.y < altura();
 }
 
-Terreno Mundo::terreno(int x, int y) const { return terreno_[indice({x, y})]; }
 Ocupante Mundo::ocupante(int x, int y) const { return ocupacao_[indice({x, y})]; }
 
-// Livre = dentro do mapa, é grama e não tem nada em cima.
+Pos Mundo::com_z(Pos p) const {
+    if (dentro(p)) p.z = mapa_.superficie(p.x, p.y);
+    return p;
+}
+
+// Livre = dentro do mapa, terra firme (não é água) e sem nada em cima.
 bool Mundo::livre(Pos p) const {
     if (!dentro(p)) return false;
-    const int i = indice(p);
-    return terreno_[i] == Terreno::Grama && ocupacao_[i] == Ocupante::Nada;
+    return mapa_.e_terra(p.x, p.y) && ocupacao_[indice(p)] == Ocupante::Nada;
+}
+
+// Passar de uma coluna para a vizinha: precisa estar livre e o degrau
+// (diferença de altura) ser de no máximo 1 nível.
+bool Mundo::pode_pisar(Pos de, Pos para) const {
+    if (!livre(para)) return false;
+    const int degrau = std::abs(mapa_.superficie(para.x, para.y) - de.z);
+    return degrau <= cfg::NPC_DEGRAU_MAX;
 }
 
 // A maçã já está sendo comida por outro NPC?
@@ -460,11 +476,21 @@ bool Mundo::procurar_agua(const Npc& n, Pos& achada) const {
     for (int dy = -metade; dy < metade; ++dy)
         for (int dx = -metade; dx < metade; ++dx) {
             Pos p{n.pos.x + dx, n.pos.y + dy};
-            if (!dentro(p) || terreno_[indice(p)] != Terreno::Agua) continue;
+            if (!dentro(p)) continue;
+            p = com_z(p);
+            // Água à vista = o topo da coluna é água.
+            if (mapa_.material(p.x, p.y, p.z) != Material::Agua) continue;
+            // Precisa ter ao lado uma célula de terra de onde dá para beber:
+            // no nível da água ou até 1 acima.
             bool da_para_beber = false;
             for (Pos v : VIZINHOS) {
-                Pos q{p.x + v.x, p.y + v.y};
-                if (q == n.pos || livre(q)) { da_para_beber = true; break; }
+                Pos q = com_z({p.x + v.x, p.y + v.y});
+                if (!dentro(q) || !(q == n.pos || livre(q))) continue;
+                const int desnivel = q.z - p.z;
+                if (desnivel >= 0 && desnivel <= cfg::NPC_DEGRAU_MAX) {
+                    da_para_beber = true;
+                    break;
+                }
             }
             if (!da_para_beber) continue;
             const int ps = distancia_passos(n.pos, p), d2 = distancia2(n.pos, p);
@@ -479,8 +505,13 @@ bool Mundo::procurar_agua(const Npc& n, Pos& achada) const {
     return achou;
 }
 
+// Move para a coluna vizinha. Se mudou de nível (subiu ou desceu 1), o
+// próximo passo só vem depois de 5 s em vez de 1 s.
 void Mundo::mover(Npc& n, Pos destino) {
+    destino = com_z(destino);
     ocupacao_[indice(n.pos)] = Ocupante::Nada;
+    if (destino.z != n.pos.z)
+        n.falta_passo += cfg::NPC_SUBIR_S - cfg::NPC_PASSO_S;
     n.anterior = n.pos;
     n.tem_anterior = true;
     n.pos = destino;
@@ -500,8 +531,30 @@ std::vector<Pos> Mundo::macas() const {
     std::vector<Pos> r;
     for (int y = 0; y < altura(); ++y)
         for (int x = 0; x < largura(); ++x)
-            if (ocupacao_[indice({x, y})] == Ocupante::Maca) r.push_back({x, y});
+            if (ocupacao_[indice({x, y})] == Ocupante::Maca)
+                r.push_back(com_z({x, y}));
     return r;
+}
+
+std::vector<std::uint8_t> Mundo::visao(int z) const {
+    std::vector<std::uint8_t> r(static_cast<size_t>(largura()) * altura());
+    for (int y = 0; y < altura(); ++y)
+        for (int x = 0; x < largura(); ++x) {
+            const Mapa3D::Visto v = mapa_.ver(x, y, z);
+            std::uint8_t b = static_cast<std::uint8_t>(v.material);
+            if (v.profundidade > 0) b |= 1u << 4;
+            // O ocupante fica na superfície: aparece se é ela que se vê.
+            if (ocupacao_[indice({x, y})] != Ocupante::Nada &&
+                v.z == mapa_.superficie(x, y))
+                b |= 1u << 5;
+            r[indice({x, y})] = b;
+        }
+    return r;
+}
+
+void Mundo::teste_definir(int x, int y, int z, Material m, int nivel_agua) {
+    mapa_.definir(x, y, z, m, nivel_agua);
+    mapa_.recalcular_superficie(x, y);
 }
 
 }  // namespace genesis

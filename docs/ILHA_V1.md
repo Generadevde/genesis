@@ -13,6 +13,9 @@ em `motor/src/config.hpp`, cada um com o comentário de onde veio.
   macieira > grama > água).
 
 ### Mapa
+> Desde o motor 0.4 o mapa é em 3D (relevo, terra, pedra, água com física):
+> ver [MUNDO_3D.md](MUNDO_3D.md). O texto abaixo é o da primeira versão.
+
 - **128 × 128** células, quadrado (por enquanto). Era 512 × 512: a tela do
   dono do projeto mostrava só água.
 - **8 células de água** a partir de cada borda (era 48); depois começa a

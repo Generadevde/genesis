@@ -16,6 +16,31 @@ inline constexpr int ALTURA  = 128;
 // Água: 8 células a partir de cada borda (era 48). Depois começa a terra.
 inline constexpr int BORDA_AGUA = 8;
 
+// --- Mundo em 3 dimensões (pedido em 14/11/2026) -------------------------
+// Níveis z de -64 a +64; o nível 0 é o nível do mar.
+inline constexpr int Z_MIN = -64;
+inline constexpr int Z_MAX = 64;
+inline constexpr int NIVEL_DO_MAR = 0;
+// Superfície da terra: entre +1 e +4 (morros). O topo é grama; abaixo,
+// terra até o -3; dali para baixo, pedra.
+inline constexpr int SUPERFICIE_MIN = 1;
+inline constexpr int SUPERFICIE_MAX = 4;
+inline constexpr int TERRA_ATE_Z = -3;
+// Mar (borda de BORDA_AGUA células): água do nível 0 até o -10; abaixo, pedra.
+inline constexpr int MAR_FUNDO_Z = -10;
+
+// Relevo "médio" (pedido do dono). Mais pra frente vira opção editável.
+// PROVISÓRIO: tamanho médio de um morro, em células, e quantas camadas de
+// detalhe se somam (cada uma com metade do tamanho e da força da anterior).
+inline constexpr double RELEVO_TAMANHO_MORRO = 24.0;  // PROVISÓRIO
+inline constexpr int RELEVO_CAMADAS = 3;               // PROVISÓRIO
+
+// --- Água (física) ----------------------------------------------------------
+// Cada célula de água tem nível de 1 a 10 (10% cada; 10 = cheia).
+inline constexpr int AGUA_NIVEL_MAX = 10;
+// A água se move a cada 3 s (valor de teste do dono do projeto).
+inline constexpr double AGUA_INTERVALO_S = 3.0;
+
 // --- Quantidades iniciais -------------------------------------------------
 inline constexpr int NUM_NPCS      = 4;
 inline constexpr int NUM_MACIEIRAS = 6;
@@ -57,6 +82,9 @@ inline constexpr double COMER_DURACAO_S = 10.0;
 // --- NPC ------------------------------------------------------------------
 // Anda 1 célula por segundo -> 1 passo a cada 1 s.
 inline constexpr double NPC_PASSO_S = 1.0;
+// Subir ou descer 1 nível leva 5 s (em vez de 1 s). Mais de 1 nível, não sobe.
+inline constexpr double NPC_SUBIR_S = 5.0;
+inline constexpr int NPC_DEGRAU_MAX = 1;
 // Enxerga maçãs e água numa área de 32 x 32 células em volta dele.
 inline constexpr int VISAO_LADO = 32;
 

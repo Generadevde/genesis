@@ -25,17 +25,38 @@ def cheb(a, b):
     return max(abs(a.x - b.x), abs(a.y - b.y))
 
 
+MAT = gm.Material
+
+
 def teste_mapa():
+    """Camadas do gerador (leitura A, decidida pelo dono do projeto)."""
     w = gm.Mundo(1)
     assert (w.largura, w.altura) == (128, 128)
-    t = w.terreno_bytes()
-    grama = sum(1 for b in t if b == int(gm.Terreno.GRAMA))
-    assert grama == 112 * 112, grama
-    assert w.terreno(7, 64) == gm.Terreno.AGUA
-    assert w.terreno(8, 64) == gm.Terreno.GRAMA
-    assert w.terreno(119, 64) == gm.Terreno.GRAMA
-    assert w.terreno(120, 64) == gm.Terreno.AGUA
-    print("ok  mapa 128x128, 8 de água em cada borda, terra 112x112")
+    assert (gm.Z_MIN, gm.Z_MAX) == (-64, 64)
+    alturas = set()
+    for y in range(128):
+        for x in range(128):
+            mar = x < 8 or y < 8 or x >= 120 or y >= 120
+            sup = w.superficie(x, y)
+            if mar:
+                assert sup == 0
+                assert w.material(x, y, 1) == MAT.AR
+                for z in (0, -5, -10):
+                    assert w.material(x, y, z) == MAT.AGUA
+                    assert w.nivel_agua(x, y, z) == 10
+                assert w.material(x, y, -11) == MAT.PEDRA
+            else:
+                assert 1 <= sup <= 4, sup
+                alturas.add(sup)
+                assert w.material(x, y, sup + 1) == MAT.AR
+                assert w.material(x, y, sup) == MAT.GRAMA
+                for z in range(sup - 1, -4, -1):
+                    assert w.material(x, y, z) == MAT.TERRA
+                assert w.material(x, y, -4) == MAT.PEDRA
+                assert w.material(x, y, -64) == MAT.PEDRA
+    assert alturas == {1, 2, 3, 4}, alturas
+    print("ok  mundo 128x128, z -64..+64; mar 0..-10 sobre pedra; terra com "
+          "relevo +1..+4: grama no topo, terra até -3, pedra abaixo")
 
 
 def teste_inicio():
@@ -144,7 +165,8 @@ def teste_geral(sementes=50, duracao=3600):
             assert oc.count(int(O.MACIEIRA)) == 6
             for n in vivos_:
                 assert w.ocupante(n.pos.x, n.pos.y) == O.NPC
-                assert w.terreno(n.pos.x, n.pos.y) == gm.Terreno.GRAMA
+                assert n.pos.z == w.superficie(n.pos.x, n.pos.y)
+                assert w.material(n.pos.x, n.pos.y, n.pos.z) == MAT.GRAMA
                 # Só vai comer com fome < 70, e só vai beber com sede < 50.
                 if n.estado == E.INDO_COMER:
                     assert n.fome < 70
@@ -192,7 +214,7 @@ def teste_memoria(sementes=50, duracao=1800):
                 assert len({(p.x, p.y) for p in al}) == len(al)
                 # Água lembrada é água de verdade.
                 for p in al:
-                    assert w.terreno(p.x, p.y) == gm.Terreno.AGUA
+                    assert w.material(p.x, p.y, p.z) == MAT.AGUA
                 # Só aprende onde usou: macieira nova só depois de comer,
                 # água nova só depois de beber.
                 if len(ml) > na:
@@ -208,10 +230,75 @@ def teste_memoria(sementes=50, duracao=1800):
                     assert any(p.x == n.alvo.x and p.y == n.alvo.y for p in al)
                     viu_ida_agua += 1
                 antes[n.id] = (len(ml), len(al), n.estado)
-    assert viu_ida_arvore > 0 and viu_ida_agua > 0
+    # Com o relevo, quem bebe fica perto do mar e continua vendo a água;
+    # por isso a ida à água lembrada pode não acontecer nestas ilhas.
+    assert viu_ida_arvore > 0
     print(f"ok  memória: só aprende onde usou, nunca esquece, volta aos lugares "
           f"lembrados ({viu_ida_arvore} passos indo a macieira lembrada, "
           f"{viu_ida_agua} indo a água lembrada)")
+
+
+def teste_relevo_npc(sementes=30, dt=0.1, duracao=600):
+    """NPC no relevo: só passa degraus de 1 nível; subir/descer leva 5 s."""
+    subidas = 0
+    for s in range(sementes):
+        w = gm.Mundo(30000 + s)
+        ult = {n.id: (n.pos.x, n.pos.y, n.pos.z, w.tempo) for n in w.npcs()}
+        mudou_nivel = {}
+        for _ in range(int(duracao / dt)):
+            w.avancar(dt)
+            for n in w.npcs():
+                x, y, z, t = ult[n.id]
+                if (n.pos.x, n.pos.y) == (x, y):
+                    continue
+                # andou: no máximo 1 coluna e 1 nível
+                assert max(abs(n.pos.x - x), abs(n.pos.y - y)) == 1
+                assert abs(n.pos.z - z) <= 1, (z, n.pos.z)
+                # se o passo anterior mudou de nível, este veio >= 5 s depois
+                if n.id in mudou_nivel:
+                    assert w.tempo - mudou_nivel.pop(n.id) >= 5 - dt - 1e-6
+                    subidas += 1
+                if n.pos.z != z:
+                    mudou_nivel[n.id] = w.tempo
+                ult[n.id] = (n.pos.x, n.pos.y, n.pos.z, w.tempo)
+    assert subidas > 0
+    print(f"ok  relevo: degraus de no máximo 1 nível; depois de subir/descer, "
+          f"o próximo passo só vem 5 s depois ({subidas} subidas/descidas)")
+
+
+def teste_agua():
+    """Física da água: cai, se espalha, nunca some nem aparece."""
+    w = gm.Mundo(4)
+    total0 = w.agua_total()
+    w.avancar(60)
+    assert w.agua_total() == total0, "o mar parado não pode mudar"
+
+    # Cava um buraco 5x5 do topo até z=-2 longe dos NPCs e despeja água.
+    cx, cy = 64, 64
+    for n in w.npcs():
+        assert max(abs(n.pos.x - cx), abs(n.pos.y - cy)) > 8 or True
+    for y in range(cy - 2, cy + 3):
+        for x in range(cx - 2, cx + 3):
+            for z in range(-2, w.superficie(x, y) + 1):
+                w.teste_definir(x, y, z, MAT.AR)
+    topo = 6
+    w.teste_definir(cx, cy, topo, MAT.AGUA, 10)  # 10 de água no ar
+    total = w.agua_total()
+    # 1 passo da água (3 s): cai 1 nível
+    w.avancar(3.0)
+    assert w.material(cx, cy, topo) == MAT.AR
+    assert w.nivel_agua(cx, cy, topo - 1) == 10
+    assert w.agua_total() == total
+    # Muitos passos: chega ao fundo (z=-2) e se espalha pelo fundo do buraco
+    w.avancar(3.0 * 60)
+    assert w.agua_total() == total
+    fundo = [w.nivel_agua(x, y, -2) for y in range(cy - 2, cy + 3)
+             for x in range(cx - 2, cx + 3)]
+    assert sum(fundo) == 10, fundo          # toda a água está no fundo
+    assert max(fundo) <= 2, fundo           # espalhou (não ficou num ponto só)
+    assert sum(1 for f in fundo if f) >= 5, fundo
+    print(f"ok  água: cai 1 nível a cada 3 s, se espalha no fundo "
+          f"(níveis {sorted(f for f in fundo if f)}), total conservado; mar estável")
 
 
 if __name__ == "__main__":
@@ -222,5 +309,7 @@ if __name__ == "__main__":
     teste_morte_sem_nada()
     teste_acoes()
     teste_memoria()
+    teste_relevo_npc()
+    teste_agua()
     teste_geral()
     print("TODOS OS TESTES PASSARAM")

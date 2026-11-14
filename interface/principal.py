@@ -45,8 +45,15 @@ SIMBOLO = {
     int(OC.NPC): "🗿",
     int(OC.CORPO): "✝",
 }
-GRAMA_SIMB = '"'
-AGUA_SIMB = "~"
+MAT = gm.Material
+# Materiais do chão: símbolo, cor e nome (escolhidos pelo dono do projeto).
+MATERIAL = {
+    int(MAT.AR): (" ", A.FUNDO_MAPA, "Ar"),
+    int(MAT.GRAMA): ('"', A.COR_GRAMA, "Grama"),
+    int(MAT.TERRA): ("d", A.COR_TERRA, "Terra"),
+    int(MAT.PEDRA): ("p", A.COR_PEDRA, "Pedra"),
+    int(MAT.AGUA): ("~", A.COR_AGUA, "Água"),
+}
 
 NOME_ESTADO = {
     EST.VAGANDO: "vagando",
@@ -64,13 +71,29 @@ NOME_ESTADO = {
 #   2, 4, 6 -> afastado: cada célula da tela mostra um bloco 2x2, 4x4, 6x6
 ESCALAS = [0.5, 1, 2, 4, 6]
 
-# No zoom afastado aparece a coisa mais importante do bloco, nesta ordem
-# (escolha do dono do projeto): NPC > corpo > maçã > macieira > grama > água.
-PRIORIDADE = {int(OC.NPC): 4, int(OC.CORPO): 3, int(OC.MACA): 2,
-              int(OC.MACIEIRA): 1}
-GRAMA = int(gm.Terreno.GRAMA)
-# Códigos de chão (acima dos números dos ocupantes, que vão de 1 a 4).
-COD_GRAMA, COD_AGUA = 100, 101
+# Cada célula da tela vira um "código" antes de virar desenho:
+#   1..4       = ocupante (NPC, corpo, maçã, macieira — números do motor)
+#   100 + m    = material m do chão (ar, grama, terra, pedra, água)
+COD_MATERIAL = 100
+
+# No zoom afastado aparece a coisa mais importante do bloco, nesta ordem:
+# NPC > corpo > maçã > macieira > grama > água (escolha do dono do projeto)
+# > terra > pedra > ar (PROVISÓRIO: terra e pedra vieram depois).
+PRIORIDADE = {
+    int(OC.NPC): 9, int(OC.CORPO): 8, int(OC.MACA): 7, int(OC.MACIEIRA): 6,
+    COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.AGUA): 4,
+    COD_MATERIAL + int(MAT.TERRA): 3, COD_MATERIAL + int(MAT.PEDRA): 2,
+    COD_MATERIAL + int(MAT.AR): 1,
+}
+
+
+def decodificar(byte_visao: int, ocupante: int):
+    """Byte da visão do motor -> (código, apagado). Ver Mundo::visao."""
+    material = byte_visao & 0x0F
+    apagado = bool(byte_visao & 0x10)
+    if byte_visao & 0x20 and ocupante:
+        return ocupante, apagado
+    return COD_MATERIAL + material, apagado
 
 
 class Simbolos:
@@ -97,7 +120,18 @@ class Simbolos:
             self._fontes_mapa[tamanho] = pygame.font.Font(A.FONTE_MAPA, tamanho)
         return self._fontes_mapa[tamanho]
 
-    def get(self, simbolo: str, lado: int, cor=A.PRETO) -> pygame.Surface:
+    def get(self, simbolo: str, lado: int, cor=A.PRETO,
+            apagado: bool = False) -> pygame.Surface:
+        """Símbolo no tamanho `lado`. `apagado` = escurecido (está abaixo
+        do nível que se está vendo)."""
+        if apagado:
+            chave = (simbolo, lado, cor, True)
+            if chave not in self._cache:
+                img = self.get(simbolo, lado, cor).copy()
+                f = round(255 * A.FATOR_APAGADO)
+                img.fill((f, f, f), special_flags=pygame.BLEND_RGB_MULT)
+                self._cache[chave] = img
+            return self._cache[chave]
         chave = (simbolo, lado, cor)
         if chave not in self._cache:
             emoji = ord(simbolo[0]) > 0x1F000
@@ -164,10 +198,12 @@ class Genesis:
         """Começa um mundo novo, com semente sorteada."""
         semente = int.from_bytes(os.urandom(8), "little")
         self.mundo = gm.Mundo(semente)
-        self.terreno = self.mundo.terreno_bytes()  # o chão não muda
         self.L, self.H = self.mundo.largura, self.mundo.altura
+        # Nível z que se está vendo. Começa no topo dos morros (+4), assim
+        # a ilha inteira aparece vista de cima — PROVISÓRIO.
+        self.z_vista = gm.SUPERFICIE_MAX
         self.cam_x = self.cam_y = None  # centraliza no próximo quadro
-        self.selecao = None  # ("npc", id) ou ("celula", x, y)
+        self.selecao = None  # ("npc", id) ou ("celula", x, y, z)
 
     def exibir_informacoes(self) -> None:
         """'Exibir': mostra a tela com as informações (aba NPCs)."""
@@ -212,19 +248,16 @@ class Genesis:
     # ------------------------------------------------------------------
     # O que tem numa célula / num bloco
     # ------------------------------------------------------------------
-    def codigo_bloco(self, oc: bytes, x0: int, y0: int, lado: int):
-        """Código e posição do que aparece num bloco lado x lado."""
-        melhor, pos, prio = COD_AGUA, (x0, y0), -1
+    def codigo_bloco(self, vis: bytes, oc: bytes, x0: int, y0: int, lado: int):
+        """O que aparece num bloco lado x lado: (código, apagado, (x, y))."""
+        melhor = None
         for y in range(y0, min(y0 + lado, self.H)):
             base = y * self.L
             for x in range(x0, min(x0 + lado, self.L)):
-                o = oc[base + x]
-                if o:
-                    if PRIORIDADE[o] > prio:
-                        melhor, pos, prio = o, (x, y), PRIORIDADE[o]
-                elif prio < 0 and self.terreno[base + x] == GRAMA:
-                    melhor, pos = COD_GRAMA, (x, y)
-        return melhor, pos
+                cod, apag = decodificar(vis[base + x], oc[base + x])
+                if melhor is None or PRIORIDADE[cod] > PRIORIDADE[melhor[0]]:
+                    melhor = (cod, apag, (x, y))
+        return melhor
 
     def npc_em(self, x: int, y: int):
         for n in self.mundo.npcs():
@@ -245,8 +278,7 @@ class Genesis:
         self._mapa_area, self._mapa_cel, self._mapa_lado = area, cel, lado
 
         oc = self.mundo.ocupacao_bytes()
-        grama = self.simbolos.get(GRAMA_SIMB, cel, A.COR_GRAMA)
-        agua = self.simbolos.get(AGUA_SIMB, cel, A.COR_AGUA)
+        vis = self.mundo.visao_bytes(self.z_vista)
         ox, oy = area.left + 2, area.top + 2
         anterior = self.tela.get_clip()
         self.tela.set_clip(area.inflate(-4, -4))
@@ -254,17 +286,12 @@ class Genesis:
             for i, mx in enumerate(range(self.cam_x, self.cam_x + vis_l, lado)):
                 if lado == 1:  # zoom normal/aproximado: célula direta
                     k = my * self.L + mx
-                    cod = oc[k] or (COD_GRAMA if self.terreno[k] == GRAMA
-                                    else COD_AGUA)
+                    cod, apagado = decodificar(vis[k], oc[k])
                 else:
-                    cod, _ = self.codigo_bloco(oc, mx, my, lado)
-                if cod == COD_GRAMA:
-                    img = grama
-                elif cod == COD_AGUA:
-                    img = agua
-                else:
-                    cor = A.COR_CRUZ if cod == int(OC.CORPO) else A.PRETO
-                    img = self.simbolos.get(SIMBOLO[cod], cel, cor)
+                    cod, apagado, _ = self.codigo_bloco(vis, oc, mx, my, lado)
+                img = self.imagem(cod, cel, apagado)
+                if img is None:
+                    continue
                 px = ox + i * cel + (cel - img.get_width()) // 2
                 py = oy + j * cel + (cel - img.get_height()) // 2
                 self.tela.blit(img, (px, py))
@@ -287,9 +314,19 @@ class Genesis:
             texto += " (memória)"
         return texto
 
+    def imagem(self, cod: int, lado: int, apagado: bool):
+        """Desenho de um código (ocupante ou material) no tamanho `lado`."""
+        if cod >= COD_MATERIAL:
+            simb, cor, _ = MATERIAL[cod - COD_MATERIAL]
+            if simb == " ":
+                return None  # ar sem nada embaixo: fica preto
+            return self.simbolos.get(simb, lado, cor, apagado)
+        cor = A.COR_CRUZ if cod == int(OC.CORPO) else A.PRETO
+        return self.simbolos.get(SIMBOLO[cod], lado, cor, apagado)
+
     def linhas_tabela(self):
         return [[f"NPC {n.id + 1}", f"{n.fome:.0f}", f"{n.sede:.0f}",
-                 self.texto_estado(n), f"({n.pos.x}, {n.pos.y})",
+                 self.texto_estado(n), f"({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
                  str(len(n.macieiras_lembradas)), str(len(n.aguas_lembradas))]
                 for n in self.mundo.npcs()]
 
@@ -312,33 +349,40 @@ class Genesis:
                 causa = "fome" if n.fome == 0 else "sede"
                 return "✝", A.PRETO, [f"Corpo do NPC {n.id + 1}",
                                       f"Morreu de {causa}",
-                                      f"Posição: ({n.pos.x}, {n.pos.y})"]
+                                      f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})"]
             linhas = [f"NPC {n.id + 1}",
                       f"Fome: {n.fome:.0f}",
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
-                      f"Posição: ({n.pos.x}, {n.pos.y})",
+                      f"Posição: ({n.pos.x}, {n.pos.y}, {n.pos.z:+d})",
                       "",
                       "Memória:"]
             arvores = self.mundo.macieiras()
             for i in n.macieiras_lembradas:
                 p = arvores[i].pos
-                linhas.append(f"  macieira em ({p.x}, {p.y})")
+                linhas.append(f"  macieira em ({p.x}, {p.y}, {p.z:+d})")
             if n.aguas_lembradas:
                 linhas.append(f"  água: {len(n.aguas_lembradas)} ponto(s)")
             if len(linhas) == 7:
                 linhas.append("  (nenhum lugar ainda)")
             return "🗿", A.PRETO, linhas
-        _, x, y = self.selecao
-        o = self.mundo.ocupante(x, y)
-        pos = f"Posição: ({x}, {y})"
-        if o == OC.MACIEIRA:
-            return "🌳", A.PRETO, ["Macieira", pos]
-        if o == OC.MACA:
-            return "🍎", A.PRETO, ["Maçã", pos]
-        if self.mundo.terreno(x, y) == gm.Terreno.GRAMA:
-            return GRAMA_SIMB, A.COR_GRAMA, ["Grama", pos]
-        return AGUA_SIMB, A.COR_AGUA, ["Água", pos]
+        _, x, y, z = self.selecao
+        pos = f"Posição: ({x}, {y}, {z:+d})"
+        # Árvore e maçã ficam na superfície.
+        if z == self.mundo.superficie(x, y):
+            o = self.mundo.ocupante(x, y)
+            if o == OC.MACIEIRA:
+                return "🌳", A.PRETO, ["Macieira", pos]
+            if o == OC.MACA:
+                return "🍎", A.PRETO, ["Maçã", pos]
+        m = int(self.mundo.material(x, y, z))
+        simb, cor, nome = MATERIAL[m]
+        linhas = [nome, pos]
+        if m == int(MAT.AGUA):
+            nivel = self.mundo.nivel_agua(x, y, z)
+            linhas.append(f"Nível da água: {nivel}/{gm.AGUA_NIVEL_MAX}"
+                          f" ({nivel * 100 // gm.AGUA_NIVEL_MAX}%)")
+        return simb, cor, linhas
 
     def posicao_selecao(self):
         if self.selecao is None:
@@ -346,7 +390,7 @@ class Genesis:
         if self.selecao[0] == "npc":
             n = self.mundo.npcs()[self.selecao[1]]
             return n.pos.x, n.pos.y
-        return self.selecao[1], self.selecao[2]
+        return self.selecao[1], self.selecao[2]  # (x, y)
 
     def desenhar_painel(self, r: pygame.Rect) -> None:
         win98.caixa(self.tela, r)
@@ -358,7 +402,8 @@ class Genesis:
         quadro = pygame.Rect(r.left + (r.width - A.TAM_SIMBOLO_GRANDE) // 2 - A.ESPACO,
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
-        fundo = A.FUNDO_MAPA if simb in (GRAMA_SIMB, AGUA_SIMB) else A.FUNDO_CAMPO
+        # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
+        fundo = A.FUNDO_MAPA if simb and simb in "\"dp~ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
             img = self.simbolos.get(simb, A.TAM_SIMBOLO_GRANDE, cor)
@@ -375,10 +420,11 @@ class Genesis:
         s = int(self.mundo.tempo)
         zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
         partes = [f"Tempo {s // 60:02d}:{s % 60:02d}",
+                  f"Nível z: {self.z_vista:+d}",
                   f"Maçãs no chão: {len(self.mundo.macas())}",
                   f"Zoom {zoom}",
                   f"Câmera ({self.cam_x}, {self.cam_y})",
-                  "Setas: mover   + / -: zoom   I: trocar aba"]
+                  "Setas: mover   + / -: zoom   Z / X: descer / subir   I: trocar aba"]
         x = r.left + 2
         for p in partes:
             w = self.fonte.size(p)[0] + 4 * A.ESPACO
@@ -427,12 +473,19 @@ class Genesis:
         mx, my = self.cam_x + i * lado, self.cam_y + j * lado
         if not (0 <= mx < self.L and 0 <= my < self.H):
             return
-        cod, (x, y) = self.codigo_bloco(self.mundo.ocupacao_bytes(), mx, my, lado)
+        vis = self.mundo.visao_bytes(self.z_vista)
+        oc = self.mundo.ocupacao_bytes()
+        cod, _, (x, y) = self.codigo_bloco(vis, oc, mx, my, lado)
         if cod in (int(OC.NPC), int(OC.CORPO)):
             n = self.npc_em(x, y)
-            self.selecao = ("npc", n.id) if n else ("celula", x, y)
-        else:
-            self.selecao = ("celula", x, y)
+            if n:
+                self.selecao = ("npc", n.id)
+                return
+        # Célula: o que se vê dali, olhando do nível atual para baixo.
+        z = self.z_vista
+        while z > gm.Z_MIN and self.mundo.material(x, y, z) == MAT.AR:
+            z -= 1
+        self.selecao = ("celula", x, y, z)
 
     def tratar_evento(self, ev) -> None:
         if ev.type == pygame.QUIT:
@@ -465,6 +518,10 @@ class Genesis:
                 self.zoom(-1)
             elif ev.unicode == "-" or ev.key == pygame.K_KP_MINUS:
                 self.zoom(+1)
+            elif ev.key == pygame.K_z:  # desce um nível
+                self.z_vista = max(gm.Z_MIN, self.z_vista - 1)
+            elif ev.key == pygame.K_x:  # sobe um nível
+                self.z_vista = min(gm.Z_MAX, self.z_vista + 1)
             elif ev.key == pygame.K_i:
                 self.abas.ativa = (self.abas.ativa + 1) % len(self.abas.nomes)
 

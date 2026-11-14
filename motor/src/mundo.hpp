@@ -16,6 +16,13 @@
 //   Cada célula guarda no máximo UMA coisa: macieira, maçã, NPC ou corpo.
 //   Nada entra numa célula ocupada. Água não é andável.
 //
+// Mundo em 3D (pedido em 14/11/2026):
+//   O chão é um volume de células (x, y, z) — ver mapa3d.hpp e gerador.hpp.
+//   NPCs, macieiras, maçãs e corpos ficam na SUPERFÍCIE: o z deles é o z da
+//   grama do topo da coluna. Por isso a ocupação continua sendo por (x, y).
+//   O NPC só passa para uma coluna vizinha se a diferença de altura for de
+//   no máximo 1 nível; subir ou descer leva 5 s em vez de 1 s.
+//
 // Memória do NPC (pedida em 14/11/2026):
 //   O NPC lembra SÓ dos lugares que usou: a macieira de onde veio a maçã que
 //   ele comeu, e a célula de água onde bebeu. Lembra todos e nunca esquece.
@@ -27,17 +34,17 @@
 #include <unordered_map>
 #include <vector>
 
+#include "mapa3d.hpp"
+
 namespace genesis {
 
-// Uma posição no mapa (coluna x, linha y).
+// Uma posição no mundo: coluna x, linha y e altura z.
 struct Pos {
     int x = 0;
     int y = 0;
+    int z = 0;
     bool operator==(const Pos&) const = default;
 };
-
-// Tipo de chão de cada célula.
-enum class Terreno : std::uint8_t { Agua = 0, Grama = 1 };
 
 // O que ocupa uma célula (no máximo uma coisa por célula).
 enum class Ocupante : std::uint8_t { Nada = 0, Macieira, Maca, Npc, Corpo };
@@ -94,19 +101,24 @@ public:
     int largura() const;
     int altura() const;
     double tempo() const { return tempo_; }
-    Terreno terreno(int x, int y) const;
     Ocupante ocupante(int x, int y) const;
+    const Mapa3D& mapa() const { return mapa_; }
     const std::vector<Macieira>& macieiras() const { return macieiras_; }
     std::vector<Pos> macas() const;
-    // O mapa inteiro de uma vez (1 byte por célula, linha por linha).
-    // A interface usa isso para desenhar rápido, sem perguntar célula a célula.
-    const std::vector<Terreno>& terreno_bruto() const { return terreno_; }
+    // A ocupação inteira de uma vez (1 byte por coluna, linha por linha).
     const std::vector<Ocupante>& ocupacao_bruta() const { return ocupacao_; }
+    // O que se vê olhando o nível z de cima, 1 byte por coluna:
+    //   bits 0-3: material visto (Material)
+    //   bit 4:    1 = está abaixo do nível z (mostrar apagado)
+    //   bit 5:    1 = o ocupante da coluna (NPC, árvore...) aparece
+    std::vector<std::uint8_t> visao(int z) const;
+
+    // --- Só para TESTES: mexer no chão à mão (cavar, despejar água) --------
+    void teste_definir(int x, int y, int z, Material m, int nivel_agua);
     const std::vector<Npc>& npcs() const { return npcs_; }
 
 private:
     // --- Criação do mundo -------------------------------------------------
-    void gerar_terreno();
     Pos sortear_grama_livre();
 
     // --- Acontecimentos ---------------------------------------------------
@@ -120,7 +132,10 @@ private:
     // --- Ajudantes --------------------------------------------------------
     bool dentro(Pos p) const;
     int indice(Pos p) const { return p.y * largura() + p.x; }
-    bool livre(Pos p) const;   // grama e sem ocupante
+    bool livre(Pos p) const;   // terra firme e sem ocupante
+    // Dá para passar de `de` para `para` (vizinhas)? Livre e degrau <= 1.
+    bool pode_pisar(Pos de, Pos para) const;
+    Pos com_z(Pos p) const;    // a mesma (x, y) com o z da superfície
     bool maca_reservada(Pos p, int por_quem_nao) const;
     bool procurar_maca(const Npc& n, Pos& achada) const;
     bool procurar_agua(const Npc& n, Pos& achada) const;
@@ -134,8 +149,9 @@ private:
     double sortear_queda();
 
     double tempo_ = 0.0;
+    double falta_agua_ = 0.0;  // segundos até o próximo passo da água
     std::mt19937_64 rng_;
-    std::vector<Terreno> terreno_;
+    Mapa3D mapa_;
     std::vector<Ocupante> ocupacao_;
     // Para cada célula com maçã: de qual macieira ela caiu (-1 = nenhuma).
     // É assim que o NPC sabe qual macieira lembrar depois de comer.

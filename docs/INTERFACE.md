@@ -17,7 +17,12 @@ terminal (rich), que foi apagada.
 - **Clique num caractere**: aparece **à direita** um painel com o **símbolo
   grande** e, embaixo, **o que ele é**.
 - Símbolos continuam os mesmos: 🗿 NPC, 🌳 macieira, 🍎 maçã, ✝ corpo,
-  `"` grama (verde), `~` água (azul).
+  `"` grama (verde), `~` água (azul); desde o mundo 3D, também `d` terra
+  (marrom) e `p` pedra (cinza).
+- **Mundo 3D**: a tela mostra **um nível z por vez**; o que está abaixo
+  aparece **apagado**. A barra de status mostra o nível. Clicar numa célula
+  mostra o material, a posição (x, y, z) e, na água, o nível (ex.: 10/10).
+  Ver [MUNDO_3D.md](MUNDO_3D.md).
 
 ## Como a tela é montada
 
@@ -41,6 +46,7 @@ terminal (rich), que foi apagada.
 | Selecionar algo | Clique no mapa, ou numa linha da tabela NPCs |
 | Mover a câmera | Setas (segurar repete) |
 | Zoom | `+` aproxima, `-` afasta (0,5x, 1x, 2x, 4x, 6x). `=` e o `+`/`-` do teclado numérico também servem |
+| Descer / subir de nível z | `Z` / `X` |
 | Trocar de aba | Clique na aba, ou tecla `I` |
 | Menu | Clique em Arquivo; `Esc` fecha |
 

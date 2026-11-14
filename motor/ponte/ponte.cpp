@@ -30,14 +30,23 @@ PYBIND11_MODULE(genesis_motor, m) {
     // para atualizar a tela no mesmo ritmo. Vem do config.hpp, para o número
     // existir num lugar só.
     m.attr("NPC_PASSO_S") = config::NPC_PASSO_S;
+    // Limites do mundo 3D, para a interface saber até onde subir/descer.
+    m.attr("Z_MIN") = config::Z_MIN;
+    m.attr("Z_MAX") = config::Z_MAX;
+    m.attr("SUPERFICIE_MAX") = config::SUPERFICIE_MAX;
+    m.attr("AGUA_NIVEL_MAX") = config::AGUA_NIVEL_MAX;
 
     py::class_<Pos>(m, "Pos")
         .def_readonly("x", &Pos::x)
-        .def_readonly("y", &Pos::y);
+        .def_readonly("y", &Pos::y)
+        .def_readonly("z", &Pos::z);
 
-    py::enum_<Terreno>(m, "Terreno")
-        .value("AGUA", Terreno::Agua)
-        .value("GRAMA", Terreno::Grama);
+    py::enum_<Material>(m, "Material")
+        .value("AR", Material::Ar)
+        .value("GRAMA", Material::Grama)
+        .value("TERRA", Material::Terra)
+        .value("PEDRA", Material::Pedra)
+        .value("AGUA", Material::Agua);
 
     py::enum_<Ocupante>(m, "Ocupante")
         .value("NADA", Ocupante::Nada)
@@ -77,17 +86,31 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_property_readonly("largura", &Mundo::largura)
         .def_property_readonly("altura", &Mundo::altura)
         .def_property_readonly("tempo", &Mundo::tempo)
-        .def("terreno", &Mundo::terreno, py::arg("x"), py::arg("y"))
         .def("ocupante", &Mundo::ocupante, py::arg("x"), py::arg("y"))
+        .def("material", [](const Mundo& w, int x, int y, int z) {
+            return w.mapa().material(x, y, z);
+        }, py::arg("x"), py::arg("y"), py::arg("z"))
+        .def("nivel_agua", [](const Mundo& w, int x, int y, int z) {
+            return w.mapa().nivel_agua(x, y, z);
+        }, py::arg("x"), py::arg("y"), py::arg("z"))
+        .def("superficie", [](const Mundo& w, int x, int y) {
+            return w.mapa().superficie(x, y);
+        }, py::arg("x"), py::arg("y"))
+        .def("agua_total", [](const Mundo& w) { return w.mapa().agua_total(); })
+        .def("visao_bytes", [](const Mundo& w, int z) {
+            const auto v = w.visao(z);
+            return py::bytes(reinterpret_cast<const char*>(v.data()), v.size());
+        }, py::arg("z"),
+           "O que se vê olhando o nível z de cima (1 byte por coluna; ver mundo.hpp).")
+        .def("teste_definir", &Mundo::teste_definir,
+             py::arg("x"), py::arg("y"), py::arg("z"), py::arg("material"),
+             py::arg("nivel_agua") = 0,
+             "SÓ PARA TESTES: muda uma célula do chão à mão.")
         .def("macieiras", &Mundo::macieiras)
         .def("macas", &Mundo::macas)
         .def("npcs", &Mundo::npcs)
         // Mapa inteiro como bytes (1 byte por célula, linha por linha).
         // O valor de cada byte é o número do enum (Terreno / Ocupante).
-        .def("terreno_bytes", [](const Mundo& w) {
-            const auto& v = w.terreno_bruto();
-            return py::bytes(reinterpret_cast<const char*>(v.data()), v.size());
-        })
         .def("ocupacao_bytes", [](const Mundo& w) {
             const auto& v = w.ocupacao_bruta();
             return py::bytes(reinterpret_cast<const char*>(v.data()), v.size());
