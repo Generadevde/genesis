@@ -17,9 +17,14 @@ Os desenhos de Windows 98 (relevo, menu, abas, tabela) estão em win98.py;
 todas as cores e tamanhos estão em aparencia.py.
 """
 
+import faulthandler
 import os
 import sys
 from pathlib import Path
+
+# Se o programa cair com "falha de segmentação", o Python mostra no terminal
+# em que linha estava. Ajuda a achar o problema.
+faulthandler.enable()
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")  # sem propaganda no terminal
 import pygame  # noqa: E402
