@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.13: fauna — galinhas (docs/FAUNA.md).
-    return "Genesis — motor 0.13 (fauna: galinhas)";
+    // Versão 0.14: mapa 512 x 512, bosques, lagos, minimapa (docs/MAPA_512.md).
+    return "Genesis — motor 0.14 (mapa 512)";
 }
 
 }  // namespace genesis

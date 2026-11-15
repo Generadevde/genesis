@@ -278,6 +278,12 @@ PYBIND11_MODULE(genesis_motor, m) {
     m.attr("TEMP_CRITICA") = config::TEMP_CRITICA;
     m.attr("HOMENS_PADRAO") = config::HOMENS_PADRAO;
     m.attr("MULHERES_PADRAO") = config::MULHERES_PADRAO;
+    m.attr("MACIEIRAS_PADRAO") = config::MACIEIRAS_PADRAO;
+    m.attr("GALINHAS_PADRAO") = config::GALINHAS_PADRAO;
+    m.attr("GALOS_PADRAO") = config::GALOS_PADRAO;
+    m.attr("PEDRAS_PADRAO") = config::PEDRAS_PADRAO;
+    m.attr("LARGURA") = config::LARGURA;
+    m.attr("ALTURA") = config::ALTURA;
     m.attr("SEGUNDOS_POR_ANO") = config::SEGUNDOS_POR_ANO;
     m.attr("SEGUNDOS_POR_MINUTO") = config::SEGUNDOS_POR_MINUTO;
     m.attr("HORA_INICIAL") = config::HORA_INICIAL;
@@ -294,9 +300,13 @@ PYBIND11_MODULE(genesis_motor, m) {
     m.attr("TEMP_FRIO") = config::TEMP_FRIO;
 
     py::class_<Mundo>(m, "Mundo")
-        .def(py::init<std::uint64_t, int, int>(), py::arg("semente"),
+        .def(py::init<std::uint64_t, int, int, int, int, int, int>(), py::arg("semente"),
              py::arg("homens") = config::HOMENS_PADRAO,
-             py::arg("mulheres") = config::MULHERES_PADRAO)
+             py::arg("mulheres") = config::MULHERES_PADRAO,
+             py::arg("macieiras") = config::MACIEIRAS_PADRAO,
+             py::arg("galinhas") = config::GALINHAS_PADRAO,
+             py::arg("galos") = config::GALOS_PADRAO,
+             py::arg("pedras") = config::PEDRAS_PADRAO)
         .def("avancar", &Mundo::avancar, py::arg("dt"),
              "Anda o tempo da simulação em dt segundos.")
         .def_property_readonly("largura", &Mundo::largura)
@@ -374,6 +384,10 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def("ovos_estragam_em", &Mundo::ovos_estragam_em, py::arg("x"), py::arg("y"))
         .def("animal_em", &Mundo::animal_em, py::arg("x"), py::arg("y"))
         .def("coracoes", &Mundo::coracoes)
+        .def("minimapa_bytes", [](const Mundo& w) {
+            const auto v = w.minimapa();
+            return py::bytes(reinterpret_cast<const char*>(v.data()), v.size());
+        }, "1 byte por célula com o que se vê de cima (ver Mundo::minimapa).")
         .def("teste_animal", &Mundo::teste_animal, py::arg("id"), py::arg("fome"),
              py::arg("sede"), py::arg("hp"), "SÓ PARA TESTES.")
         .def("teste_idade_animal", &Mundo::teste_idade_animal, py::arg("id"),

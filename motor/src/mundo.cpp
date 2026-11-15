@@ -91,7 +91,9 @@ double Inventario::peso() const {
 // Criação do mundo
 // ===========================================================================
 
-Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
+Mundo::Mundo(std::uint64_t semente, int homens, int mulheres, int macieiras,
+             int galinhas, int galos, int pedras)
+    : rng_(semente) {
     gerar_mundo(mapa_, semente);
     const size_t colunas = static_cast<size_t>(largura()) * altura();
     ocupacao_.assign(colunas, Ocupante::Nada);
@@ -99,27 +101,18 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
     contar_livres();
     falta_agua_ = cfg::AGUA_INTERVALO_S;
 
-    // 6 macieiras em células de terra livres, sorteadas ("espalhadas").
-    // Começam com 2 anos (decisão do dono do projeto).
-    for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i)
-        nova_macieira(sortear_grama_livre(), cfg::MACIEIRA_IDADE_INICIAL_ANOS);
+    criar_macieiras(macieiras);
+    criar_pedras(pedras);
 
-    // 3 pedras em células de terra livres, cada uma com 10 lascas.
-    for (int i = 0; i < cfg::NUM_PEDRAS; ++i) {
-        Pedra p;
-        p.pos = sortear_grama_livre();
-        p.lascas = cfg::PEDRA_LASCAS;
-        ocupar(indice(p.pos), Ocupante::Pedra);
-        pedras_.push_back(p);
-    }
-
-    // NPCs iniciais: `homens` homens e `mulheres` mulheres, em células de
-    // terra livres, com 20 anos, fome e sede 100. Nomes "NPC 1", "NPC 2"...
-    // e o sexo de cada número é sorteado. Se a terra lotar, para.
+    // NPCs iniciais: `homens` homens e `mulheres` mulheres, JUNTOS no meio
+    // do mapa (pedido em 15/11/2026): nas células livres mais perto do
+    // centro. 20 anos, fome e sede 100. Nomes "NPC 1", "NPC 2"... e o sexo
+    // de cada número é sorteado. Se a terra lotar, para.
     std::vector<Sexo> sexos;
     for (int i = 0; i < homens; ++i) sexos.push_back(Sexo::Homem);
     for (int i = 0; i < mulheres; ++i) sexos.push_back(Sexo::Mulher);
     std::shuffle(sexos.begin(), sexos.end(), rng_);
+    const Pos centro = com_z({largura() / 2, altura() / 2});
     for (size_t i = 0; i < sexos.size() && livres_terra_ > 0; ++i) {
         Npc n;
         n.id = static_cast<int>(npcs_.size());
@@ -133,7 +126,10 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
         n.falta_passo = cfg::NPC_PASSO_S;
         n.falta_fome = cfg::FOME_INTERVALO_S;
         n.falta_sede = cfg::SEDE_INTERVALO_S;
-        n.pos = sortear_grama_livre();
+        Pos p;
+        if (livre(centro)) p = centro;
+        else if (!lugar_livre_perto(centro, p)) break;
+        n.pos = com_z(p);
         ocupar(indice(n.pos), Ocupante::Npc);
         // Morre de velhice aos 100 anos.
         n.quando_velhice = n.nascimento + cfg::IDADE_MAXIMA_ANOS * cfg::SEGUNDOS_POR_ANO;
@@ -141,7 +137,7 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
         npcs_.push_back(n);
     }
     registrar(TipoRegistro::Inicio, homens, mulheres);
-    criar_galinhas();
+    criar_galinhas(galinhas, galos);
 
     // Estações: o que vale na estação em que o mundo começa, e o começo de
     // cada uma das próximas (cada uma se reagenda para o ano seguinte).
@@ -167,6 +163,126 @@ Pos Mundo::sortear_grama_livre() {
     while (true) {
         Pos p{dx(rng_), dy(rng_)};
         if (livre(p)) return com_z(p);
+    }
+}
+
+// Chão onde pode nascer macieira: qualquer um, menos pedra e areia.
+bool Mundo::chao_de_arvore(Pos p) const {
+    if (!livre(p)) return false;
+    const Material m = mapa_.material(p.x, p.y, mapa_.superficie(p.x, p.y));
+    return m != Material::Pedra && m != Material::Areia;
+}
+
+// Uma célula sorteada (em qualquer lugar da terra) que sirva.
+bool Mundo::sortear_lugar(const std::function<bool(Pos)>& serve, Pos& achado) {
+    std::uniform_int_distribution<int> dx(cfg::BORDA_AGUA, largura() - cfg::BORDA_AGUA - 1);
+    std::uniform_int_distribution<int> dy(cfg::BORDA_AGUA, altura() - cfg::BORDA_AGUA - 1);
+    for (int tentativa = 0; tentativa < 100000; ++tentativa) {
+        Pos p{dx(rng_), dy(rng_)};
+        if (serve(p)) { achado = com_z(p); return true; }
+    }
+    return false;
+}
+
+// Uma célula que sirva perto de `centro` (camadas em volta; sorteada na
+// primeira camada que tiver alguma).
+bool Mundo::lugar_perto(Pos centro, const std::function<bool(Pos)>& serve, Pos& achado) {
+    for (int r = 1; r < std::max(largura(), altura()); ++r) {
+        std::vector<Pos> opcoes;
+        auto testar = [&](int x, int y) {
+            Pos p{x, y};
+            if (dentro(p) && serve(p)) opcoes.push_back(p);
+        };
+        for (int dx = -r; dx <= r; ++dx) {
+            testar(centro.x + dx, centro.y - r);
+            testar(centro.x + dx, centro.y + r);
+        }
+        for (int dy = -r + 1; dy <= r - 1; ++dy) {
+            testar(centro.x - r, centro.y + dy);
+            testar(centro.x + r, centro.y + dy);
+        }
+        if (!opcoes.empty()) {
+            std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
+            achado = com_z(opcoes[d(rng_)]);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Macieiras do começo (pedido em 15/11/2026): 9% soltas pelo mapa e 91% em
+// bosques de 6 a 28 (o último bosque fica com o que sobrar). Cada uma com
+// uma idade sorteada de 0 a 44 anos de vida: até 3, é muda; de 3 a 43,
+// macieira; depois, macieira seca (o último ano).
+void Mundo::criar_macieiras(int total) {
+    const auto serve = [this](Pos p) { return chao_de_arvore(p); };
+    auto plantar = [&](Pos p) {
+        const double vida_muda = cfg::MUDA_VIRA_ARVORE_ANOS;
+        const double vida = vida_muda + cfg::MACIEIRA_VIDA_ANOS + cfg::MACIEIRA_SECA_ANOS;
+        const double anos = sortear(0.0, vida);
+        if (anos < vida_muda) {
+            Muda u;
+            u.id = proximo_id_muda_++;
+            u.pos = com_z(p);
+            u.nasceu = tempo_ - anos * cfg::SEGUNDOS_POR_ANO;
+            u.quando_virar = u.nasceu + vida_muda * cfg::SEGUNDOS_POR_ANO;
+            mudas_[u.id] = u;
+            ocupar(indice(p), Ocupante::Muda);
+            agendar(u.quando_virar, MUDA_VIRA_ARVORE, u.id);
+        } else {
+            nova_macieira(p, anos - vida_muda);  // passou dos 40: seca já no início
+        }
+    };
+    const int soltas = static_cast<int>(std::lround(total * cfg::MACIEIRAS_SOLTAS));
+    for (int i = 0; i < soltas; ++i) {
+        Pos p;
+        if (!sortear_lugar(serve, p)) return;
+        plantar(p);
+    }
+    int falta = total - soltas;
+    std::uniform_int_distribution<int> tamanho(cfg::BOSQUE_MIN, cfg::BOSQUE_MAX);
+    while (falta > 0) {
+        const int n = std::min(falta, tamanho(rng_));
+        Pos centro;
+        if (!sortear_lugar(serve, centro)) return;
+        plantar(centro);
+        for (int k = 1; k < n; ++k) {
+            Pos p;
+            if (!lugar_perto(centro, serve, p)) break;
+            plantar(p);
+        }
+        falta -= n;
+    }
+}
+
+// Pedras do começo: 70% soltas; 30% em grupos de 2 a 4. Em qualquer lugar.
+void Mundo::criar_pedras(int total) {
+    const auto serve = [this](Pos p) { return livre(p); };
+    auto por = [&](Pos p) {
+        Pedra pd;
+        pd.pos = com_z(p);
+        pd.lascas = cfg::PEDRA_LASCAS;
+        ocupar(indice(pd.pos), Ocupante::Pedra);
+        pedras_.push_back(pd);
+    };
+    int em_grupo = static_cast<int>(std::lround(total * cfg::PEDRAS_EM_GRUPO));
+    for (int i = 0; i < total - em_grupo; ++i) {
+        Pos p;
+        if (!sortear_lugar(serve, p)) return;
+        por(p);
+    }
+    std::uniform_int_distribution<int> tamanho(cfg::GRUPO_PEDRAS_MIN, cfg::GRUPO_PEDRAS_MAX);
+    while (em_grupo > 0) {
+        const int n = std::min(em_grupo, tamanho(rng_));
+        Pos centro;
+        if (!sortear_lugar(serve, centro)) return;
+        por(centro);
+        for (int k = 1; k < n; ++k) {
+            Pos p;
+            if (!lugar_perto(centro, serve, p)) break;
+            por(p);
+        }
+        em_grupo -= n;
     }
 }
 
@@ -889,27 +1005,41 @@ bool Mundo::chegou(Pos q, Pos alvo, Chegar como) const {
 // onde dá para pisar (livre e degrau de no máximo 1), em ordem de distância.
 // O primeiro lugar que serve é o mais perto A PÉ; volta pelo caminho até o
 // primeiro passo e dá esse passo.
+// (O rascunho da busca — busca_valor_ / busca_marca_ — é reaproveitado:
+// com o mapa 512 x 512, criar e zerar uma tabela do tamanho do mapa a
+// cada passo deixava tudo muito lento.)
+void Mundo::nova_busca() const {
+    const size_t total = static_cast<size_t>(largura()) * altura();
+    if (busca_valor_.size() != total) {
+        busca_valor_.assign(total, -1);
+        busca_marca_.assign(total, 0);
+    }
+    ++busca_vez_;
+}
+
 bool Mundo::passo_em_direcao(Npc& n, Pos alvo, Chegar como) {
     if (chegou(n.pos, alvo, como)) return true;
-    const int total = largura() * altura();
-    std::vector<int> pai(static_cast<size_t>(total), -2);  // -2 = não visitado
+    nova_busca();
+    const unsigned vez = busca_vez_;
     std::vector<Pos> fila;
     fila.reserve(256);
     const int ini = indice(n.pos);
-    pai[ini] = -1;
+    busca_marca_[ini] = vez;
+    busca_valor_[ini] = -1;
     fila.push_back(n.pos);
     for (size_t k = 0; k < fila.size(); ++k) {
         const Pos cur = fila[k];
         if (k > 0 && chegou(cur, alvo, como)) {
             int i = indice(cur);
-            while (pai[i] != ini) i = pai[i];  // volta até o 1º passo
+            while (busca_valor_[i] != ini) i = busca_valor_[i];  // volta até o 1º passo
             mover(n, com_z({i % largura(), i / largura()}));
             return true;
         }
         for (Pos v : VIZINHOS) {
             Pos p = com_z({cur.x + v.x, cur.y + v.y});
-            if (!dentro(p) || pai[indice(p)] != -2 || !pode_pisar(cur, p)) continue;
-            pai[indice(p)] = indice(cur);
+            if (!dentro(p) || busca_marca_[indice(p)] == vez || !pode_pisar(cur, p)) continue;
+            busca_marca_[indice(p)] = vez;
+            busca_valor_[indice(p)] = indice(cur);
             fila.push_back(p);
         }
     }
@@ -933,20 +1063,28 @@ bool Mundo::passo_em_direcao(Npc& n, Pos alvo, Chegar como) {
     return false;
 }
 
-std::vector<int> Mundo::distancias(Pos de) const {
-    std::vector<int> d(static_cast<size_t>(largura()) * altura(), -1);
+// Distância a pé de `de` até cada coluna; o resultado fica no rascunho
+// (ver distancia_ate). -1 = não chega.
+void Mundo::distancias(Pos de) const {
+    nova_busca();
+    const unsigned vez = busca_vez_;
     std::vector<Pos> fila{de};
-    d[indice(de)] = 0;
+    busca_marca_[indice(de)] = vez;
+    busca_valor_[indice(de)] = 0;
     for (size_t k = 0; k < fila.size(); ++k) {
         const Pos cur = fila[k];
         for (Pos v : VIZINHOS) {
             Pos p = com_z({cur.x + v.x, cur.y + v.y});
-            if (!dentro(p) || d[indice(p)] != -1 || !pode_pisar(cur, p)) continue;
-            d[indice(p)] = d[indice(cur)] + 1;
+            if (!dentro(p) || busca_marca_[indice(p)] == vez || !pode_pisar(cur, p)) continue;
+            busca_marca_[indice(p)] = vez;
+            busca_valor_[indice(p)] = busca_valor_[indice(cur)] + 1;
             fila.push_back(p);
         }
     }
-    return d;
+}
+
+int Mundo::distancia_ate(int i) const {
+    return busca_marca_[i] == busca_vez_ ? busca_valor_[i] : -1;
 }
 
 // Terminou de comer: a fome (e, com maçã, a sede) sobe (até 100).
@@ -1118,7 +1256,7 @@ std::vector<Muda> Mundo::mudas() const {
 // 40 anos de vida: a macieira seca (cinza) e não dá mais maçãs.
 void Mundo::evento_macieira_seca(Macieira& m) {
     m.seca = true;
-    m.quando_sumir = tempo_ + cfg::MACIEIRA_SECA_ANOS * cfg::SEGUNDOS_POR_ANO;
+    m.quando_sumir = m.quando_secar + cfg::MACIEIRA_SECA_ANOS * cfg::SEGUNDOS_POR_ANO;
     m.quedas.clear();
     m.quando_queda = -1.0;
     ocupar(indice(m.pos), Ocupante::MacieiraSeca);
@@ -1432,36 +1570,11 @@ bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
                              Pos& onde) const {
     // "Mais perto" = menos passos A PÉ até ficar ao lado (só os que dá para
     // alcançar). Primeiro os que ele VÊ (32 x 32); se nenhum, os que LEMBRA.
-    // Antes de calcular os caminhos (caro), vê se existe algum candidato.
+    // A busca a pé para no primeiro que alcança (o mais perto) — no mapa
+    // 512 x 512, medir a distância até o mapa todo a cada passo era caro.
     const int metade = cfg::VISAO_LADO / 2;
-    {
-        bool algum = false;
-        for (int dy = -metade; dy < metade && !algum; ++dy)
-            for (int dx = -metade; dx < metade; ++dx) {
-                Pos p{n.pos.x + dx, n.pos.y + dy};
-                if (!dentro(p)) continue;
-                const Ocupante o = ocupacao_[indice(p)];
-                if (pedra ? (o == Ocupante::Pedra)
-                          : (o == Ocupante::Macieira || o == Ocupante::MacieiraSeca)) {
-                    algum = true;
-                    break;
-                }
-            }
-        if (!algum && (pedra ? n.pedras_lembradas : n.macieiras_lembradas).empty())
-            return false;
-    }
-    const std::vector<int> d = distancias(n.pos);
-    auto passos_ate = [&](Pos alvo) {
-        int melhor = -1;
-        for (Pos v : VIZINHOS) {
-            Pos q{alvo.x + v.x, alvo.y + v.y};
-            if (!dentro(q)) continue;
-            const int dq = d[indice(q)];
-            if (dq >= 0 && (melhor < 0 || dq < melhor)) melhor = dq;
-        }
-        return melhor;
-    };
-    int melhor_d = -1;
+    struct Alvo { int indice; Pos pos; };
+    std::vector<Alvo> vistos, lembrados;
     for (int dy = -metade; dy < metade; ++dy)
         for (int dx = -metade; dx < metade; ++dx) {
             Pos p{n.pos.x + dx, n.pos.y + dy};
@@ -1469,18 +1582,9 @@ bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
             const Ocupante o = ocupacao_[indice(p)];
             const bool serve = pedra ? (o == Ocupante::Pedra)
                                      : (o == Ocupante::Macieira || o == Ocupante::MacieiraSeca);
-            if (!serve) continue;
-            const int passos = passos_ate(p);
-            if (passos < 0) continue;  // não dá para chegar
-            if (melhor_d < 0 || passos < melhor_d) {
-                melhor_d = passos;
-                onde = com_z(p);
-                indice_achado = pedra ? pedra_em(p.x, p.y) : macieira_em(p.x, p.y);
-            }
+            if (serve) vistos.push_back({pedra ? pedra_em(p.x, p.y) : macieira_em(p.x, p.y), com_z(p)});
         }
-    if (melhor_d >= 0) return true;
-    const std::vector<int>& lembrados = pedra ? n.pedras_lembradas : n.macieiras_lembradas;
-    for (int idx : lembrados) {
+    for (int idx : pedra ? n.pedras_lembradas : n.macieiras_lembradas) {
         const bool existe = pedra ? pedras_[idx].existe : macieiras_[idx].existe;
         const Pos p = pedra ? pedras_[idx].pos : macieiras_[idx].pos;
         // Ele não sabe se ela ainda existe: vai até lá e descobre (ver
@@ -1488,15 +1592,38 @@ bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
         const int dx = p.x - n.pos.x, dy = p.y - n.pos.y;
         const bool a_vista = dx >= -metade && dx < metade && dy >= -metade && dy < metade;
         if (!existe && a_vista) continue;
-        const int passos = passos_ate(p);
-        if (passos < 0) continue;
-        if (melhor_d < 0 || passos < melhor_d) {
-            melhor_d = passos;
-            onde = p;
-            indice_achado = idx;
+        lembrados.push_back({idx, p});
+    }
+    for (const auto* grupo : {&vistos, &lembrados}) {
+        if (grupo->empty()) continue;
+        // Célula ao lado de cada alvo -> qual alvo.
+        std::unordered_map<int, size_t> ao_lado;
+        for (size_t k = 0; k < grupo->size(); ++k)
+            for (Pos v : VIZINHOS) {
+                Pos q{(*grupo)[k].pos.x + v.x, (*grupo)[k].pos.y + v.y};
+                if (dentro(q)) ao_lado.emplace(indice(q), k);
+            }
+        nova_busca();
+        const unsigned vez = busca_vez_;
+        std::vector<Pos> fila{n.pos};
+        busca_marca_[indice(n.pos)] = vez;
+        for (size_t k = 0; k < fila.size(); ++k) {
+            const Pos cur = fila[k];
+            auto it = ao_lado.find(indice(cur));
+            if (it != ao_lado.end()) {
+                indice_achado = (*grupo)[it->second].indice;
+                onde = (*grupo)[it->second].pos;
+                return true;
+            }
+            for (Pos v : VIZINHOS) {
+                Pos p = com_z({cur.x + v.x, cur.y + v.y});
+                if (!dentro(p) || busca_marca_[indice(p)] == vez || !pode_pisar(cur, p)) continue;
+                busca_marca_[indice(p)] = vez;
+                fila.push_back(p);
+            }
         }
     }
-    return melhor_d >= 0;
+    return false;
 }
 
 // Vai até o lugar do trabalho e trabalha. Se o alvo sumiu, desiste dele
@@ -2227,6 +2354,35 @@ std::vector<Pos> Mundo::macas() const {
         for (int x = 0; x < largura(); ++x)
             if (ocupacao_[indice({x, y})] == Ocupante::Maca)
                 r.push_back(com_z({x, y}));
+    return r;
+}
+
+std::vector<std::uint8_t> Mundo::minimapa() const {
+    std::vector<std::uint8_t> r(static_cast<size_t>(largura()) * altura());
+    for (int i = 0; i < static_cast<int>(r.size()); ++i) {
+        const int x = i % largura(), y = i / largura();
+        std::uint8_t c = 0;
+        switch (ocupacao_[i]) {
+            case Ocupante::Macieira: c = 8; break;
+            case Ocupante::MacieiraSeca: c = 9; break;
+            case Ocupante::Muda: c = 10; break;
+            case Ocupante::Maca: c = 11; break;
+            case Ocupante::Pedra: c = 12; break;
+            case Ocupante::Abrigo: c = 13; break;
+            case Ocupante::Npc: c = 14; break;
+            case Ocupante::Corpo: c = 15; break;
+            case Ocupante::Animal: c = 16; break;
+            case Ocupante::Ovo: c = 17; break;
+            case Ocupante::Carne:
+            case Ocupante::CorpoAnimal: c = 18; break;
+            default: {
+                const Material m = mapa_.material(x, y, mapa_.superficie(x, y));
+                static constexpr std::uint8_t COR[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+                c = COR[static_cast<int>(m) & 7];
+            }
+        }
+        r[i] = c;
+    }
     return r;
 }
 

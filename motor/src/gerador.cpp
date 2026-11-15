@@ -172,6 +172,47 @@ void gerar_mundo(Mapa3D& mapa, std::uint64_t semente) {
     }
     mapa.recalcular_superficies();
 
+    // --- 3b) Lagos (pedido em 15/11/2026) ------------------------------------
+    // Os vales que NÃO se ligam ao mar ficam secos; destes, 4 sorteados
+    // enchem de água até o nível do mar. Cada vale seco = um grupo de
+    // colunas vizinhas (norte, sul, leste, oeste) com o chão abaixo do 0.
+    // Os tamanhos e fundos variam conforme o vale sorteado.
+    {
+        std::vector<int> grupo(static_cast<size_t>(L) * H, -1);
+        std::vector<std::vector<std::array<int, 2>>> vales;
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < L; ++x) {
+                if (grupo[y * L + x] >= 0 || mapa.superficie(x, y) >= cfg::NIVEL_DO_MAR) continue;
+                if (mapa.material(x, y, mapa.superficie(x, y)) == Material::Agua) continue;
+                const int g = static_cast<int>(vales.size());
+                vales.push_back({});
+                std::vector<std::array<int, 2>> pilha{{x, y}};
+                grupo[y * L + x] = g;
+                while (!pilha.empty()) {
+                    const auto [cx, cy] = pilha.back();
+                    pilha.pop_back();
+                    vales[g].push_back({cx, cy});
+                    const int vz[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                    for (const auto& d : vz) {
+                        const int nx = cx + d[0], ny = cy + d[1];
+                        if (nx < 0 || ny < 0 || nx >= L || ny >= H) continue;
+                        if (grupo[ny * L + nx] >= 0) continue;
+                        if (mapa.superficie(nx, ny) >= cfg::NIVEL_DO_MAR) continue;
+                        if (mapa.material(nx, ny, mapa.superficie(nx, ny)) == Material::Agua) continue;
+                        grupo[ny * L + nx] = g;
+                        pilha.push_back({nx, ny});
+                    }
+                }
+            }
+        std::mt19937_64 rng_lagos(semente ^ 0x4c41474f53ull);  // "LAGOS"
+        std::shuffle(vales.begin(), vales.end(), rng_lagos);
+        for (int k = 0; k < cfg::NUM_LAGOS && k < static_cast<int>(vales.size()); ++k)
+            for (const auto& [x, y] : vales[k])
+                for (int z = mapa.superficie(x, y) + 1; z <= cfg::NIVEL_DO_MAR; ++z)
+                    mapa.definir(x, y, z, Material::Agua, cfg::AGUA_NIVEL_MAX);
+        mapa.recalcular_superficies();
+    }
+
     // --- 4) Areia ------------------------------------------------------------
     // Pedido do dono: o chão cujo topo está no nível do mar (0) e encosta no
     // mar vira areia. "Encostar" = alguma das 8 colunas vizinhas tem água no

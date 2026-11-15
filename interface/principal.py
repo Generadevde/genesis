@@ -162,6 +162,11 @@ def hora_texto(horas: float) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
+# Campos da janela Nova simulação (na ordem dos argumentos do Mundo).
+CAMPOS_DIALOGO = [("homens", "Homens:"), ("mulheres", "Mulheres:"),
+                  ("macieiras", "Macieiras:"), ("galinhas", "Galinhas:"),
+                  ("galos", "Galos:"), ("pedras", "Pedras:")]
+
 TAREFA = gm.Tarefa
 NOME_TAREFA = {
     TAREFA.NENHUMA: "nenhum",
@@ -361,10 +366,16 @@ class Genesis:
     # Ações do menu
     # ------------------------------------------------------------------
     def nova_simulacao(self, homens: int = gm.HOMENS_PADRAO,
-                       mulheres: int = gm.MULHERES_PADRAO) -> None:
-        """Começa um mundo novo, com semente sorteada e esses NPCs."""
+                       mulheres: int = gm.MULHERES_PADRAO,
+                       macieiras: int = gm.MACIEIRAS_PADRAO,
+                       galinhas: int = gm.GALINHAS_PADRAO,
+                       galos: int = gm.GALOS_PADRAO,
+                       pedras: int = gm.PEDRAS_PADRAO) -> None:
+        """Começa um mundo novo, com semente sorteada e esses números."""
         semente = int.from_bytes(os.urandom(8), "little")
-        self.mundo = gm.Mundo(semente, homens, mulheres)
+        self.mundo = gm.Mundo(semente, homens, mulheres, macieiras, galinhas, galos, pedras)
+        self._minimapa = None
+        self._minimapa_t = -1e9
         self.historico = []   # acontecimentos já formatados (aba Histórico)
         self.rolagem_npcs = self.rolagem_hist = self.rolagem_fauna = 0
         self.L, self.H = self.mundo.largura, self.mundo.altura
@@ -378,22 +389,26 @@ class Genesis:
     def abrir_dialogo_nova(self) -> None:
         """Abre a janela com os campos de homens e mulheres."""
         self.dialogo = {"homens": str(gm.HOMENS_PADRAO),
-                        "mulheres": str(gm.MULHERES_PADRAO), "foco": "homens"}
+                        "mulheres": str(gm.MULHERES_PADRAO),
+                        "macieiras": str(gm.MACIEIRAS_PADRAO),
+                        "galinhas": str(gm.GALINHAS_PADRAO),
+                        "galos": str(gm.GALOS_PADRAO),
+                        "pedras": str(gm.PEDRAS_PADRAO), "foco": "homens"}
 
     def desenhar_dialogo(self) -> None:
         d = self.dialogo
         alt = self.fonte.get_height() + 2 * A.ESPACO
-        largura = (self.fonte.size("Mulheres:")[0] + A.LARGURA_CAMPO_NUMERO
+        largura = (self.fonte.size("Macieiras:")[0] + A.LARGURA_CAMPO_NUMERO
                    + 8 * A.ESPACO)
-        altura = 5 * alt + 6 * A.ESPACO
+        altura = (len(CAMPOS_DIALOGO) + 3) * alt + (len(CAMPOS_DIALOGO) + 4) * A.ESPACO
         tela_l, tela_a = self.tela.get_size()
         r = pygame.Rect((tela_l - largura) // 2, (tela_a - altura) // 2, largura, altura)
         self._dlg_fechar = win98.janela(self.tela, r, self.fonte_negrito, "Nova simulação")
         x_rot = r.left + 2 * A.ESPACO
-        x_campo = x_rot + self.fonte.size("Mulheres:")[0] + 2 * A.ESPACO
+        x_campo = x_rot + self.fonte.size("Macieiras:")[0] + 2 * A.ESPACO
         y = r.top + alt + 2 * A.ESPACO
         self._dlg_campos = {}
-        for chave, rotulo in (("homens", "Homens:"), ("mulheres", "Mulheres:")):
+        for chave, rotulo in CAMPOS_DIALOGO:
             win98.escrever(self.tela, self.fonte, rotulo, (x_rot, y + A.ESPACO))
             campo = pygame.Rect(x_campo, y, A.LARGURA_CAMPO_NUMERO, alt)
             win98.caixa(self.tela, campo, saliente=False, cor=A.FUNDO_CAMPO)
@@ -411,7 +426,7 @@ class Genesis:
     def confirmar_dialogo(self) -> None:
         d = self.dialogo
         self.dialogo = None
-        self.nova_simulacao(int(d["homens"] or 0), int(d["mulheres"] or 0))
+        self.nova_simulacao(*(int(d[c] or 0) for c, _ in CAMPOS_DIALOGO))
 
     def evento_dialogo(self, ev) -> None:
         """Enquanto a janela está aberta, só ela recebe mouse e teclado."""
@@ -430,7 +445,8 @@ class Genesis:
             elif ev.key == pygame.K_ESCAPE:
                 self.dialogo = None
             elif ev.key == pygame.K_TAB:
-                d["foco"] = "mulheres" if d["foco"] == "homens" else "homens"
+                chaves = [c for c, _ in CAMPOS_DIALOGO]
+                d["foco"] = chaves[(chaves.index(d["foco"]) + 1) % len(chaves)]
             elif ev.key == pygame.K_BACKSPACE:
                 d[d["foco"]] = d[d["foco"]][:-1]
             elif ev.unicode.isdigit():  # só números (sem máximo)
@@ -973,9 +989,53 @@ class Genesis:
             return a.pos.x, a.pos.y
         return self.selecao[1], self.selecao[2]  # (x, y)
 
+    def desenhar_minimapa(self, x: int, y: int) -> int:
+        """Minimapa no painel: 1 pixel por célula, com um retângulo no pedaço
+        que aparece na tela. Devolve onde ele termina (y)."""
+        agora = time.perf_counter()
+        if self._minimapa is None or agora - self._minimapa_t >= A.MINIMAPA_ATUALIZA_S:
+            img = pygame.image.frombuffer(self.mundo.minimapa_bytes(), (self.L, self.H), "P")
+            img.set_palette(A.MINIMAPA_CORES + [(0, 0, 0)] * (256 - len(A.MINIMAPA_CORES)))
+            img = img.convert()
+            # NPCs vivos num quadradinho maior, para aparecerem.
+            m = A.MINIMAPA_MARCA_NPC
+            for n in self.mundo.npcs():
+                if n.estado != EST.MORTO:
+                    img.fill(A.MINIMAPA_CORES[14], (n.pos.x - m // 2, n.pos.y - m // 2, m, m))
+            self._minimapa, self._minimapa_t = img, agora
+        quadro = pygame.Rect(x, y, self.L + 4, self.H + 4)
+        win98.caixa(self.tela, quadro, saliente=False, cor=A.FUNDO_MAPA)
+        self.tela.blit(self._minimapa, (x + 2, y + 2))
+        self._minimapa_rect = pygame.Rect(x + 2, y + 2, self.L, self.H)
+        if hasattr(self, "_mapa_area") and self.cam_x is not None:
+            _, lado = self._mapa_cel, self._mapa_lado
+            area = self._mapa_area
+            vis_l = (area.width - 4) // self._mapa_cel * lado
+            vis_a = (area.height - 4) // self._mapa_cel * lado
+            pygame.draw.rect(self.tela, A.BRANCO,
+                             (x + 2 + self.cam_x, y + 2 + self.cam_y, vis_l, vis_a), 1)
+        return quadro.bottom
+
+    def clique_minimapa(self, pos) -> bool:
+        """Clique no minimapa: leva a câmera para lá (centralizada)."""
+        r = getattr(self, "_minimapa_rect", None)
+        if r is None or not r.collidepoint(pos) or not hasattr(self, "_mapa_area"):
+            return False
+        area, cel, lado = self._mapa_area, self._mapa_cel, self._mapa_lado
+        vis_l = (area.width - 4) // cel * lado
+        vis_a = (area.height - 4) // cel * lado
+        self.cam_x = pos[0] - r.left - vis_l // 2
+        self.cam_y = pos[1] - r.top - vis_a // 2
+        self.limitar_camera(vis_l, vis_a)
+        return True
+
     def desenhar_painel(self, r: pygame.Rect) -> None:
         win98.caixa(self.tela, r)
         y = r.top + 2 * A.ESPACO
+        win98.escrever(self.tela, self.fonte_negrito, "Mapa inteiro",
+                       (r.left + 2 * A.ESPACO, y))
+        y += self.fonte.get_height() + A.ESPACO
+        y = self.desenhar_minimapa(r.left + (r.width - self.L - 4) // 2, y) + 2 * A.ESPACO
         win98.escrever(self.tela, self.fonte_negrito, "Seleção",
                        (r.left + 2 * A.ESPACO, y))
         y += self.fonte.get_height() + 2 * A.ESPACO
@@ -1286,7 +1346,7 @@ class Genesis:
                     self.clique_mapa(ev.pos)
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             if (self.menu.clique(ev.pos) or self.abas.clique(ev.pos)
-                    or self.clique_velocidade(ev.pos)):
+                    or self.clique_velocidade(ev.pos) or self.clique_minimapa(ev.pos)):
                 return
             conteudo = self.layout()[0]
             if not conteudo.collidepoint(ev.pos):

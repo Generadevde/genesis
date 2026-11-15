@@ -17,4 +17,5 @@ Projeto hobby de simulação inspirado em Dwarf Fortress (a parte da simulação
 - Pedra, ferramentas, lenha e abrigo: [docs/ABRIGO.md](docs/ABRIGO.md)
 - Família (sexos, casais, filhos, idade) e aba Histórico: [docs/FAMILIA.md](docs/FAMILIA.md)
 - Fauna (galinhas), inventário por peso, caça: [docs/FAUNA.md](docs/FAUNA.md)
+- Mapa 512 x 512, bosques, lagos, pedras, minimapa: [docs/MAPA_512.md](docs/MAPA_512.md)
 - Interface (estilo Windows 98): [docs/INTERFACE.md](docs/INTERFACE.md)

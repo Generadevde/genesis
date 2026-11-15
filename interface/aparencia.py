@@ -60,8 +60,8 @@ QUADROS_POR_SEGUNDO = 60
 # ---------------------------------------------------------------------------
 TAM_FONTE_UI = 14          # PROVISÓRIO: texto de menus, abas, tabela, status
 TAM_CELULA = 24            # PROVISÓRIO: lado de 1 célula do mapa, em pixels (zoom 1x)
-LARGURA_PAINEL = 280       # PROVISÓRIO: painel da direita (seleção)
-TAM_SIMBOLO_GRANDE = 128   # PROVISÓRIO: símbolo grande no painel da direita
+LARGURA_PAINEL = 536       # PROVISÓRIO: painel da direita (minimapa de 512 px + seleção)
+TAM_SIMBOLO_GRANDE = 64    # PROVISÓRIO: símbolo do painel da direita (era 128; diminuiu para caber o minimapa)
 ESPACO = 6                 # PROVISÓRIO: folga interna de barras, abas e células da tabela
 LINHAS_POR_RODINHA = 3     # PROVISÓRIO: linhas que a rodinha rola nas listas (tabela, histórico)
 LARGURA_CAMPO_NUMERO = 120 # PROVISÓRIO: largura dos campos de número da janela Nova simulação
@@ -73,3 +73,29 @@ REPETIR_TECLA_INTERVALO_MS = 50   # PROVISÓRIO
 # andar. Se o motor não conseguir andar tudo nesse tempo, o tempo do jogo
 # anda menos (e a barra de baixo mostra a velocidade de verdade).
 ORCAMENTO_MOTOR_MS = 12     # PROVISÓRIO
+
+# Minimapa (pedido em 15/11/2026): 1 pixel por célula, no painel da direita.
+# Cores de cada coisa (PROVISÓRIO: as cores do mapa, um pouco mais fortes).
+MINIMAPA_CORES = [
+    (0, 0, 0),        # 0 ar
+    (0, 128, 0),      # 1 grama
+    (170, 85, 0),     # 2 terra
+    (128, 128, 128),  # 3 pedra (chão)
+    (0, 0, 255),      # 4 água
+    (255, 255, 255),  # 5 neve
+    (255, 255, 0),    # 6 areia
+    (128, 200, 255),  # 7 gelo
+    (0, 255, 0),      # 8 macieira
+    (160, 160, 160),  # 9 macieira seca
+    (120, 255, 120),  # 10 muda
+    (255, 0, 0),      # 11 maçã
+    (64, 64, 64),     # 12 pedra (lascas)
+    (255, 128, 0),    # 13 abrigo
+    (255, 0, 255),    # 14 NPC
+    (255, 255, 255),  # 15 corpo de NPC
+    (255, 200, 120),  # 16 animal
+    (250, 240, 220),  # 17 ovo
+    (150, 60, 60),    # 18 carne / animal morto
+]
+MINIMAPA_ATUALIZA_S = 0.5  # de quanto em quanto tempo (real) o minimapa é redesenhado
+MINIMAPA_MARCA_NPC = 3     # lado do quadradinho dos NPCs (para aparecerem)

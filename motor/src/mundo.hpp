@@ -147,6 +147,7 @@ struct Animal {
     Pos alvo;                     // grama, água, galo, mãe, ninho...
     std::vector<Pos> aguas;       // memória: onde bebeu
     std::vector<Pos> caminho;     // caminho guardado até um lugar lembrado (de trás p/ frente)
+    double tentar_lembrada_em = 0.0;  // a busca no mapa todo falhou: só tenta de novo depois
     // Bando e família
     int mae = -1;
     int bando = -1;               // id do galo do bando (o galo: o próprio id)
@@ -360,7 +361,9 @@ class Mundo {
 public:
     // `semente` define o sorteio. A mesma semente gera sempre o mesmo mundo
     // (útil para testes). Sem semente, a interface sorteia uma.
-    Mundo(std::uint64_t semente, int homens, int mulheres);
+    Mundo(std::uint64_t semente, int homens, int mulheres,
+          int macieiras = config::MACIEIRAS_PADRAO, int galinhas = config::GALINHAS_PADRAO,
+          int galos = config::GALOS_PADRAO, int pedras = config::PEDRAS_PADRAO);
 
     // Anda o tempo da simulação em `dt` segundos.
     void avancar(double dt);
@@ -461,6 +464,11 @@ public:
     int animal_em(int x, int y) const;
     // Coração ❤️: galinhas namorando e casais de NPC juntos no abrigo.
     std::vector<Pos> coracoes() const;
+    // Minimapa: 1 byte por célula (linha por linha) com o que se vê de cima:
+    // 0 ar, 1 grama, 2 terra, 3 pedra (chão), 4 água, 5 neve, 6 areia,
+    // 7 gelo, 8 macieira, 9 macieira seca, 10 muda, 11 maçã, 12 pedra (⬟),
+    // 13 abrigo, 14 NPC, 15 corpo, 16 animal, 17 ovo, 18 carne / animal morto.
+    std::vector<std::uint8_t> minimapa() const;
     void teste_animal(int id, double fome, double sede, double hp);
     void teste_idade_animal(int id, double dias);
     void teste_mover_animal(int id, int x, int y);
@@ -511,7 +519,12 @@ private:
     int tirar_carcaca(int celula);              // devolve o item (2, 3 ou 4)
     int carcaca_na_celula(int celula) const;    // tipo (0, 1, 2) ou -1
     // Fauna (fauna.cpp)
-    void criar_galinhas();
+    void criar_galinhas(int galinhas, int galos);
+    void criar_macieiras(int total);
+    void criar_pedras(int total);
+    bool chao_de_arvore(Pos p) const;
+    bool sortear_lugar(const std::function<bool(Pos)>& serve, Pos& achado);
+    bool lugar_perto(Pos centro, const std::function<bool(Pos)>& serve, Pos& achado);
     int novo_animal(Sexo sexo, double idade_dias, Pos pos, int mae, int bando);
     void evento_animal(int id);
     void evento_animal_nec(int id);
@@ -530,6 +543,7 @@ private:
     // `serve`. 0 = não achou; 1 = já está numa; 2 = deu um passo.
     // Com `mapa_todo`, procura no mapa inteiro (para ir a um lugar lembrado).
     int buscar_animal(Animal& a, const std::function<bool(Pos)>& serve, bool mapa_todo = false);
+    int caminho_ate(Animal& a, Pos alvo, const std::function<bool(Pos)>& serve);
     void mover_animal(Animal& a, Pos para);
     bool pode_pisar_animal(const Animal& a, Pos de, Pos para) const;
     bool explorar_animal(Animal& a, bool livre = false);
@@ -614,7 +628,9 @@ private:
     bool passo_em_direcao(Npc& n, Pos alvo, Chegar como = Chegar::AoLado);
     bool chegou(Pos q, Pos alvo, Chegar como) const;
     // Distância a pé (em passos) de `de` até cada coluna; -1 = não chega.
-    std::vector<int> distancias(Pos de) const;
+    void distancias(Pos de) const;
+    int distancia_ate(int indice_celula) const;
+    void nova_busca() const;
     bool ir_a_macieira_lembrada(Npc& n);
     bool ir_a_agua_lembrada(Npc& n);
     void mover(Npc& n, Pos destino);
@@ -669,6 +685,11 @@ private:
     std::vector<int> bfs_pai_;
     std::vector<unsigned> bfs_marca_;
     unsigned bfs_vez_ = 0;
+    std::vector<int> astar_g_;
+    // O mesmo, para as buscas dos NPCs.
+    mutable std::vector<int> busca_valor_;
+    mutable std::vector<unsigned> busca_marca_;
+    mutable unsigned busca_vez_ = 0;
 };
 
 }  // namespace genesis

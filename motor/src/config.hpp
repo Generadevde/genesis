@@ -11,11 +11,14 @@
 namespace genesis::config {
 
 // --- Mapa -----------------------------------------------------------------
-// Mapa quadrado de 128 x 128 células (era 512 x 512; mudado em 14/11/2026).
-inline constexpr int LARGURA = 128;
-inline constexpr int ALTURA  = 128;
-// Água: 8 células a partir de cada borda (era 48). Depois começa a terra.
-inline constexpr int BORDA_AGUA = 8;
+// Mapa quadrado de 512 x 512 células (pedido em 15/11/2026; antes 128).
+inline constexpr int LARGURA = 512;
+inline constexpr int ALTURA  = 512;
+// Mar: 32 células a partir de cada borda. Depois começa a terra.
+inline constexpr int BORDA_AGUA = 32;
+// Lagos: 4 vales SEM ligação com o mar, sorteados (tamanhos e fundos
+// variados), enchem de água até o nível do mar.
+inline constexpr int NUM_LAGOS = 4;
 
 // --- Tempo e calendário (pedido em 15/11/2026; substitui o de 14/11) -----
 // 1 segundo do jogo = 1 segundo real (na velocidade normal).
@@ -151,6 +154,25 @@ inline constexpr double AGUA_INTERVALO_S = 5.0;
 // "NPC 2"...; o sexo de cada número é sorteado.
 inline constexpr int HOMENS_PADRAO = 3;
 inline constexpr int MULHERES_PADRAO = 3;
+// Os NPCs do começo nascem juntos, no meio do mapa.
+// O resto do mundo inicial (pedido em 15/11/2026; editável na janela Nova
+// simulação): 48 macieiras, 28 galinhas, 3 galos, 25 pedras.
+inline constexpr int MACIEIRAS_PADRAO = 48;
+inline constexpr int GALINHAS_PADRAO = 28;
+inline constexpr int GALOS_PADRAO = 3;
+inline constexpr int PEDRAS_PADRAO = 25;
+// Macieiras: 9% soltas; 91% em bosques de 6 a 28. Nascem em qualquer chão,
+// menos pedra e areia. Idade sorteada de 0 a 44 anos de vida: os 3
+// primeiros são de muda, depois 40 de macieira e 1 de seca.
+inline constexpr double MACIEIRAS_SOLTAS = 0.09;
+inline constexpr int BOSQUE_MIN = 6, BOSQUE_MAX = 28;
+// Pedras: 70% soltas; 30% em grupos de 2 a 4.
+inline constexpr double PEDRAS_EM_GRUPO = 0.30;
+inline constexpr int GRUPO_PEDRAS_MIN = 2, GRUPO_PEDRAS_MAX = 4;
+// Galinhas: cada galo com um bando de 4 a 8 galinhas; as que sobram ficam
+// espalhadas (sozinhas, procurando galo). Todas adultas, idade sorteada
+// (90 dias a 3 anos).
+inline constexpr int BANDO_INICIAL_MIN = 4, BANDO_INICIAL_MAX = 8;
 // --- Inventário (pedido em 15/11/2026): o que o NPC carrega é medido em
 // PESO, com qualquer mistura. Na mão: até 8 kg; no abrigo: até 80 kg.
 inline constexpr double INVENTARIO_KG = 8.0;
@@ -168,7 +190,10 @@ inline constexpr double MACIEIRA_VAZIA_MAX_S = 5.0 * 86400.0;
 // ataque; um ataque a cada 5 s (para todos, por enquanto).
 inline constexpr double NPC_DANO = 10.0;
 inline constexpr double ATAQUE_S = 5.0;
-inline constexpr int NUM_MACIEIRAS = 6;
+// Animal que não achou caminho até a água que lembra: só tenta de novo
+// 1 hora depois (enquanto isso, explora) — PROVISÓRIO; a busca no mapa
+// 512 x 512 inteiro, a cada passo, deixava o jogo muito lento.
+inline constexpr double ANIMAL_REBUSCA_S = 3600.0;
 
 // --- Fome -----------------------------------------------------------------
 // Vai de 0 (faminto) a 100 (satisfeito). Em 0 é crítico: o NPC perde HP
@@ -225,8 +250,7 @@ inline constexpr double MACIEIRA_SECA_ANOS = 1.0;
 inline constexpr double MACIEIRA_IDADE_INICIAL_ANOS = 2.0;
 
 // --- Pedras, ferramentas, lenha e abrigo (pedido em 14/11/2026) ------------
-// 3 pedras por mapa; cada uma tem 10 lascas e some quando esgota.
-inline constexpr int NUM_PEDRAS = 3;
+// Cada pedra tem 10 lascas e some quando esgota.
 inline constexpr int PEDRA_LASCAS = 10;
 // Cada trabalho leva um tempo sorteado (a cada vez) entre o mínimo e o
 // máximo, em segundos.
@@ -345,10 +369,5 @@ inline constexpr FichaEspecie GALINHA = {
     21.0, 0.05, 0.20, 1.0, 60.0,
 };
 
-// No começo: 10 galinhas e 2 galos, em 2 bandos (1 galo + 5 galinhas),
-// todos com 91 dias.
-inline constexpr int BANDOS_INICIAIS = 2;
-inline constexpr int GALINHAS_POR_BANDO = 5;
-inline constexpr double IDADE_INICIAL_GALINHA_DIAS = 91.0;
 
 }  // namespace genesis::config

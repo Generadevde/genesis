@@ -145,6 +145,11 @@ isso (`mundo.avancar(dt)`). 60 quadros por segundo = taxa do monitor do dono.
   no abrigo do casal procriando; inventário em kg nos painéis — ver
   [FAUNA.md](FAUNA.md).
 
+### Minimapa e Nova simulação (motor 0.14)
+- Minimapa no painel da direita (1 pixel por célula, retângulo da tela,
+  clique leva a câmera); a janela Nova simulação tem Homens, Mulheres,
+  Macieiras, Galinhas, Galos e Pedras — ver [MAPA_512.md](MAPA_512.md).
+
 ## Valores PROVISÓRIOS (aguardando o dono do projeto)
 
 Estão em `interface/aparencia.py`:

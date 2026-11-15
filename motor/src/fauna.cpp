@@ -36,18 +36,33 @@ constexpr double DIA = cfg::SEGUNDOS_POR_DIA;
 // Criação
 // ===========================================================================
 
-// 2 bandos: em cada um, 1 galo num lugar sorteado e 5 galinhas em volta.
-// Todos com 91 dias (decisão do dono).
-void Mundo::criar_galinhas() {
-    for (int b = 0; b < cfg::BANDOS_INICIAIS && livres_terra_ > 0; ++b) {
-        const Pos p = sortear_grama_livre();
-        const int galo = novo_animal(Sexo::Homem, cfg::IDADE_INICIAL_GALINHA_DIAS, p, -1, -1);
+// Galinhas do começo (pedido em 15/11/2026): cada galo num lugar sorteado
+// com um bando de 4 a 8 galinhas em volta; as galinhas que sobram ficam
+// espalhadas pelo mapa (sozinhas: vão procurar um galo). Todas adultas,
+// com idade sorteada entre 90 dias e 3 anos.
+void Mundo::criar_galinhas(int galinhas, int galos) {
+    const FichaEspecie& f = cfg::GALINHA;
+    const auto serve = [this](Pos p) { return livre(p); };
+    auto idade = [&]() { return sortear(f.adulto_dias, f.velhice_anos * 365.0); };
+    std::uniform_int_distribution<int> tam(cfg::BANDO_INICIAL_MIN, cfg::BANDO_INICIAL_MAX);
+    int sobram = galinhas;
+    for (int b = 0; b < galos; ++b) {
+        Pos p;
+        if (!sortear_lugar(serve, p)) return;
+        const int galo = novo_animal(Sexo::Homem, idade(), p, -1, -1);
         animais_[galo].bando = galo;
-        for (int k = 0; k < cfg::GALINHAS_POR_BANDO; ++k) {
+        const int n = std::min(sobram, tam(rng_));
+        for (int k = 0; k < n; ++k) {
             Pos q;
-            if (!lugar_livre_perto(p, q)) break;
-            novo_animal(Sexo::Mulher, cfg::IDADE_INICIAL_GALINHA_DIAS, com_z(q), -1, galo);
+            if (!lugar_perto(p, serve, q)) break;
+            novo_animal(Sexo::Mulher, idade(), q, -1, galo);
+            --sobram;
         }
+    }
+    for (; sobram > 0; --sobram) {
+        Pos p;
+        if (!sortear_lugar(serve, p)) return;
+        novo_animal(Sexo::Mulher, idade(), p, -1, -1);
     }
 }
 
@@ -285,6 +300,69 @@ int Mundo::buscar_animal(Animal& a, const std::function<bool(Pos)>& serve, bool 
                 mover_animal(a, fila[j]);
                 return 2;
             }
+        }
+    }
+    return 0;
+}
+
+// Caminho até perto de `alvo` (longe, fora da visão): busca A* — vai
+// primeiro pelas células que estão mais na direção do alvo, então visita
+// pouco do mapa quando o caminho é quase direto. Guarda o caminho e o segue
+// enquanto ele valer. 0 = não há caminho; 1 = já chegou; 2 = deu um passo.
+int Mundo::caminho_ate(Animal& a, Pos alvo, const std::function<bool(Pos)>& serve) {
+    if (serve(a.pos)) { a.caminho.clear(); return 1; }
+    if (!a.caminho.empty() && serve(a.caminho.front())) {
+        const Pos prox = com_z(a.caminho.back());
+        if (pode_pisar_animal(a, a.pos, prox)) {
+            a.caminho.pop_back();
+            a_subiu_ = prox.z != a.pos.z;
+            mover_animal(a, prox);
+            return 2;
+        }
+    }
+    a.caminho.clear();
+    const size_t total = static_cast<size_t>(largura()) * altura();
+    if (bfs_pai_.size() != total) {
+        bfs_pai_.assign(total, -1);
+        bfs_marca_.assign(total, 0);
+    }
+    const unsigned vez = ++bfs_vez_;
+    // custo até aqui (g) guardado junto do pai: usa um vetor à parte.
+    if (astar_g_.size() != total) astar_g_.assign(total, 0);
+    using No = std::pair<int, int>;  // (f = g + h, célula)
+    std::priority_queue<No, std::vector<No>, std::greater<No>> aberta;
+    const int ini = indice(a.pos);
+    bfs_marca_[ini] = vez;
+    bfs_pai_[ini] = -1;
+    astar_g_[ini] = 0;
+    aberta.push({distancia_passos(a.pos, alvo), ini});
+    while (!aberta.empty()) {
+        const auto [fc, i] = aberta.top();
+        aberta.pop();
+        const Pos cur = com_z({i % largura(), i / largura()});
+        if (fc > astar_g_[i] + distancia_passos(cur, alvo)) continue;  // velho
+        if (i != ini && serve(cur)) {
+            // guarda o caminho (de trás para frente) e dá o 1º passo
+            int j = i;
+            while (bfs_pai_[j] != ini) {
+                a.caminho.push_back(com_z({j % largura(), j / largura()}));
+                j = bfs_pai_[j];
+            }
+            const Pos primeiro = com_z({j % largura(), j / largura()});
+            a_subiu_ = primeiro.z != a.pos.z;
+            mover_animal(a, primeiro);
+            return 2;
+        }
+        for (Pos v : VIZINHOS) {
+            Pos p = com_z({cur.x + v.x, cur.y + v.y});
+            if (!dentro(p) || !pode_pisar_animal(a, cur, p)) continue;
+            const int k = indice(p);
+            const int g = astar_g_[i] + 1;
+            if (bfs_marca_[k] == vez && astar_g_[k] <= g) continue;
+            bfs_marca_[k] = vez;
+            bfs_pai_[k] = i;
+            astar_g_[k] = g;
+            aberta.push({g + distancia_passos(p, alvo), k});
         }
     }
     return 0;
@@ -594,21 +672,26 @@ bool Mundo::cuidar_necessidades(Animal& a) {
             agendar_passo(a, a_subiu_ ? f.subir_s : f.passo_s);
             return true;
         }
-        // Nada à vista: vai (pelo caminho, no mapa todo) a uma água lembrada.
-        if (a.aguas.empty()) return false;
-        auto lembrada = [&](Pos q) {
-            for (Pos v : VIZINHOS) {
-                Pos w = com_z({q.x + v.x, q.y + v.y});
-                if (!dentro(w) || mapa_.material(w.x, w.y, w.z) != Material::Agua) continue;
-                const int desnivel = q.z - w.z;
-                if (desnivel < 0 || desnivel > f.degrau_max) continue;
-                for (Pos m : a.aguas)
-                    if (m.x == w.x && m.y == w.y) return true;
-            }
-            return false;
+        // Nada à vista: vai (pelo caminho) à água lembrada mais perto.
+        if (a.aguas.empty() || tempo_ < a.tentar_lembrada_em) return false;
+        int melhor_d = -1;
+        Pos agua{};
+        for (Pos m : a.aguas) {
+            if (mapa_.material(m.x, m.y, m.z) != Material::Agua) continue;  // congelou
+            const int d = distancia_passos(a.pos, m);
+            if (melhor_d < 0 || d < melhor_d) { melhor_d = d; agua = m; }
+        }
+        if (melhor_d < 0) return false;
+        auto ao_lado_da_agua = [&](Pos q) {
+            if (distancia_passos(q, agua) != 1) return false;
+            const int desnivel = q.z - agua.z;
+            return desnivel >= 0 && desnivel <= f.degrau_max;
         };
         a_subiu_ = false;
-        if (buscar_animal(a, lembrada, true) != 2) return false;
+        if (caminho_ate(a, agua, ao_lado_da_agua) != 2) {
+            a.tentar_lembrada_em = tempo_ + cfg::ANIMAL_REBUSCA_S;
+            return false;
+        }
         a.estado = EstadoAnimal::IndoBeber;
         agendar_passo(a, a_subiu_ ? f.subir_s : f.passo_s);
         return true;
