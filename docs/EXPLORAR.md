@@ -1,5 +1,7 @@
 # Explorar (motor 0.9)
 
+> **Mudou em 15/11/2026:** o NPC agora anda 1 célula a cada **5 s** (subir/descer: 10 s). Ver [TEMPO.md](TEMPO.md).
+
 Pedido pelo dono do projeto em 14/11/2026. Substitui o "andar à toa"
 (e a regra antiga de "não voltar para a célula de onde saiu").
 

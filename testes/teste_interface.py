@@ -93,22 +93,41 @@ def main() -> None:
     assert nome in (n.nome, f"Corpo de {n.nome}"), nome
     print(f"ok  barra de baixo: tempo + nome sob o mouse ('{nome}')")
 
-    # --- Botões de velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x
+    # --- Botões de velocidade: || pausa, > normal, >> 1 min/s, >>> 1 h/s,
+    #     >>>> 1 dia/s; o clicado fica ligado; Espaço pausa e continua.
     assert g.velocidade == 1
+    esperado = [0, 1, 60, 3600, 86400]
+    assert [m for _, m in g._botoes_velocidade] == esperado
     for (botao, mult) in list(g._botoes_velocidade):
         evento(pygame.MOUSEBUTTONDOWN, button=1, pos=botao.center)
         assert g.velocidade == mult, (g.velocidade, mult)
         g.desenhar()
-    botao, mult = g._botoes_velocidade[-1]
-    evento(pygame.MOUSEBUTTONDOWN, button=1, pos=botao.center)
-    assert g.velocidade == 1
-    # o tempo do motor anda vezes a velocidade
-    g.velocidade = 8
+    # 1 dia por segundo: 1/60 s real anda 1440 s do jogo (se o motor der conta)
     t0 = g.mundo.tempo
-    g.mundo.avancar(0.5 * g.velocidade)
-    assert abs(g.mundo.tempo - t0 - 4.0) < 1e-9
+    g.andar_tempo(1 / 60)
+    andou = g.mundo.tempo - t0
+    assert 0 < andou <= 86400 / 60 + 1e-6, andou
+    evento(pygame.KEYDOWN, key=pygame.K_SPACE, unicode=" ")
+    assert g.velocidade == 0
+    t0 = g.mundo.tempo
+    g.andar_tempo(0.5)
+    assert g.mundo.tempo == t0  # pausado: não anda
+    evento(pygame.KEYDOWN, key=pygame.K_SPACE, unicode=" ")
+    assert g.velocidade == 86400
     g.velocidade = 1
-    print("ok  velocidade: > 2x, >> 4x, >>>> 8x; clicar de novo volta a 1x")
+    t0 = g.mundo.tempo
+    g.andar_tempo(0.5)
+    assert abs(g.mundo.tempo - t0 - 0.5) < 1e-9  # normal: 1 s do jogo por s
+    print(f"ok  velocidade: || > >> >>> >>>> = {esperado} s/s; Espaço pausa "
+          f"(1 dia/s andou {andou:.0f} s num quadro)")
+
+    # --- Barra de baixo mostra data e estação; pilha de maçãs "xN"
+    texto = g.texto_relogio()
+    assert texto.startswith("01/01/0001") and "Verão" in texto, texto
+    g.mundo.avancar(2 * 86400)  # o verão já está derrubando maçãs
+    g.abas.ativa = 0
+    g.desenhar()
+    print(f"ok  barra de baixo: '{texto}'; {len(g.mundo.pilhas())} pilha(s) desenhadas")
 
     # --- Janela "Nova simulação": digita 4 homens e 2 mulheres, OK.
     g.abrir_dialogo_nova()

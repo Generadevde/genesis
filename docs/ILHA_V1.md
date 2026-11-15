@@ -1,5 +1,7 @@
 # Primeira simulação: a ilha (motor 0.2)
 
+> **Atenção:** os tempos deste documento são os da primeira versão. Os de hoje estão em [TEMPO.md](TEMPO.md) (15/11/2026).
+
 Pedido e respostas do dono do projeto (14/11/2026). Todos os números estão
 em `motor/src/config.hpp`, cada um com o comentário de onde veio.
 

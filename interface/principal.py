@@ -20,6 +20,7 @@ todas as cores e tamanhos estão em aparencia.py.
 import faulthandler
 import os
 import sys
+import time
 from pathlib import Path
 
 # Se o programa cair com "falha de segmentação", o Python mostra no terminal
@@ -73,6 +74,7 @@ MATERIAL = {
     int(MAT.TERRA): ("d", A.COR_TERRA, "Terra"),
     int(MAT.PEDRA): ("p", A.COR_PEDRA, "Pedra"),
     int(MAT.AGUA): ("~", A.COR_AGUA, "Água"),
+    int(MAT.GELO): ("g", A.COR_GELO, "Gelo"),
 }
 
 NOME_ESTADO = {
@@ -90,6 +92,7 @@ NOME_ESTADO = {
     EST.INDO_PROCRIAR: "indo ao abrigo com o par (procriar)",
     EST.PROCRIANDO: "no abrigo com o par (procriar)",
     EST.BEBE: "bebê",
+    EST.INDO_GUARDAR: "levando maçãs para o abrigo",
 }
 
 SEXO = gm.Sexo
@@ -103,8 +106,16 @@ CATEGORIA = {
     REG.ARVORE_CORTADA: "Trabalho", REG.PEDRA_ESGOTOU: "Trabalho",
     REG.MUDA_NASCEU: "Plantas", REG.ARVORE_NASCEU: "Plantas",
     REG.ARVORE_SECOU: "Plantas", REG.ARVORE_SUMIU: "Plantas",
+    REG.ESTACAO: "Estações", REG.CONGELOU: "Estações", REG.DERRETEU: "Estações",
 }
-CATEGORIAS = ["Pessoas", "Trabalho", "Plantas"]
+CATEGORIAS = ["Pessoas", "Trabalho", "Plantas", "Estações"]
+
+ESTACAO = gm.Estacao
+NOME_ESTACAO = {ESTACAO.VERAO: "Verão", ESTACAO.OUTONO: "Outono",
+                ESTACAO.INVERNO: "Inverno", ESTACAO.PRIMAVERA: "Primavera"}
+# O que a macieira está fazendo em cada estação (pedido do dono do projeto).
+FASE_MACIEIRA = {ESTACAO.PRIMAVERA: "florescendo", ESTACAO.VERAO: "dando frutos",
+                 ESTACAO.OUTONO: "folhas secas", ESTACAO.INVERNO: "repouso"}
 
 
 def causas_morte(bits: int) -> str:
@@ -112,11 +123,21 @@ def causas_morte(bits: int) -> str:
     return " e ".join(nomes) if nomes else "?"
 
 
+def data_texto(d) -> str:
+    """'01/01/0001' (dia/mês/ano) de uma Data do motor."""
+    return f"{d.dia:02d}/{d.mes:02d}/{d.ano:04d}"
+
+
 def relogio_de(tempo: float) -> str:
-    """'Dia 2, 14:05' para um tempo da simulação (1 h = SEGUNDOS_POR_HORA s)."""
-    minutos = int(tempo / (gm.SEGUNDOS_POR_HORA / 60) + 1e-9) + gm.HORA_INICIAL * 60
-    dia, resto = divmod(minutos, 24 * 60)
-    return f"Dia {dia + 1}, {resto // 60:02d}:{resto % 60:02d}"
+    """'01/01/0001 07:00' para um tempo da simulação (segundos)."""
+    d = gm.Mundo.data_de(tempo)
+    return f"{data_texto(d)} {d.hora:02d}:{d.minuto:02d}"
+
+
+def hora_texto(horas: float) -> str:
+    """6.25 -> '06:15'."""
+    m = int(round(horas * 60))
+    return f"{m // 60:02d}:{m % 60:02d}"
 
 
 TAREFA = gm.Tarefa
@@ -126,6 +147,7 @@ NOME_TAREFA = {
     TAREFA.GALHOS: "tirar galhos da árvore",
     TAREFA.CORTAR: "cortar árvore (lenha)",
     TAREFA.CONSTRUIR: "construir abrigo",
+    TAREFA.MACHADO: "fazer machado",
 }
 
 # Zoom (escolhido pelo dono do projeto): + aproxima, - afasta.
@@ -135,10 +157,13 @@ NOME_TAREFA = {
 #   2, 4, 6 -> afastado: cada célula da tela mostra um bloco 2x2, 4x4, 6x6
 ESCALAS = [0.5, 1, 2, 4, 6]
 
-# Botões de velocidade ao lado do tempo (pedido do dono do projeto):
-# ">" = 2x, ">>" = 4x, ">>>>" = 8x, ">>>>>>>>" = 16x (pedido depois).
-# Clicar no botão já ligado volta a 1x.
-VELOCIDADES = [(">", 2), (">>", 4), (">>>>", 8), (">>>>>>>>", 16)]
+# Botões de velocidade ao lado do tempo (pedido do dono do projeto em
+# 15/11/2026): quantos segundos do jogo andam por segundo real.
+#   ⏸ = pausa;  > = normal (1 s por s);  >> = 1 minuto por s;
+#   >>> = 1 hora por s;  >>>> = 1 dia por s.
+VELOCIDADES = [("||", 0), (">", 1), (">>", 60), (">>>", 3600), (">>>>", 86400)]
+NOME_VELOCIDADE = {0: "pausado", 1: "normal (1 s/s)", 60: "1 min/s",
+                   3600: "1 h/s", 86400: "1 dia/s"}
 
 # Cada célula da tela vira um "código" antes de virar desenho:
 #   1..4       = ocupante (NPC, corpo, maçã, macieira — números do motor)
@@ -156,7 +181,7 @@ PRIORIDADE = {
     COD_HOMEM: 9, COD_MULHER: 9, COD_BEBE: 9,
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
     COD_MATERIAL + int(MAT.AREIA): 5,
-    COD_MATERIAL + int(MAT.AGUA): 4,
+    COD_MATERIAL + int(MAT.AGUA): 4, COD_MATERIAL + int(MAT.GELO): 4,
     COD_MATERIAL + int(MAT.TERRA): 3, COD_MATERIAL + int(MAT.PEDRA): 2,
     COD_MATERIAL + int(MAT.AR): 1,
 }
@@ -175,16 +200,22 @@ def decodificar(byte_visao: int, ocupante: int) -> int:
 
 
 def duracao(segundos: float) -> str:
-    """Tempo do jogo por extenso: "2 dias 5 h", "3 h 20 min", "45 min".
-    (1 hora do jogo = SEGUNDOS_POR_HORA segundos da simulação.)"""
-    minutos = max(0, int(segundos / (gm.SEGUNDOS_POR_HORA / 60)))
-    dias, resto = divmod(minutos, 24 * 60)
-    horas, mins = divmod(resto, 60)
+    """Tempo do jogo por extenso: "3 anos 20 dias", "2 dias 5 h",
+    "3 h 20 min", "4 min 10 s", "45 s"."""
+    s = max(0, int(segundos))
+    anos, s = divmod(s, int(gm.SEGUNDOS_POR_ANO))
+    dias, s = divmod(s, int(gm.SEGUNDOS_POR_DIA))
+    horas, s = divmod(s, 3600)
+    mins, s = divmod(s, 60)
+    if anos:
+        return f"{anos} ano{'s' if anos > 1 else ''} {dias} dia{'s' if dias != 1 else ''}"
     if dias:
         return f"{dias} dia{'s' if dias > 1 else ''} {horas} h"
     if horas:
         return f"{horas} h {mins} min"
-    return f"{mins} min"
+    if mins:
+        return f"{mins} min {s} s"
+    return f"{s} s"
 
 
 class Simbolos:
@@ -279,8 +310,10 @@ class Genesis:
         self.rolagem_hist = 0        # primeira linha mostrada no histórico
         self.filtros = {c: True for c in CATEGORIAS}  # PROVISÓRIO: tudo ligado
         self._arraste = None  # clique-e-arraste do mapa em andamento
-        self.velocidade = 1   # 1x = tempo real; 2x, 4x, 8x pelos botões
-        self._botoes_velocidade = []  # (retângulo, multiplicador)
+        self.velocidade = 1   # segundos do jogo por segundo real (0 = pausa)
+        self.velocidade_real = 1.0    # o que o motor conseguiu de verdade
+        self._botoes_velocidade = []  # (retângulo, velocidade)
+        self._fontes_pilha = {}       # fonte do "xN" por tamanho
         self.nivel_zoom = ESCALAS.index(1)
         self.nova_simulacao()
 
@@ -461,6 +494,8 @@ class Genesis:
         # Quem está em cada célula (para desenhar homem / mulher / bebê).
         pessoas = {(n.pos.x, n.pos.y): self.codigo_pessoa(n) for n in self.mundo.npcs()
                    if n.estado != EST.MORTO and n.dentro_abrigo < 0}
+        # Pilhas de maçãs: quantas em cada célula (para o "xN").
+        pilhas = {(x, y): q for x, y, q in self.mundo.pilhas()}
         ox, oy = area.left + 2, area.top + 2
         anterior = self.tela.get_clip()
         self.tela.set_clip(area.inflate(-4, -4))
@@ -480,6 +515,8 @@ class Genesis:
                 px = ox + i * cel + (cel - img.get_width()) // 2
                 py = oy + j * cel + (cel - img.get_height()) // 2
                 self.tela.blit(img, (px, py))
+                if cod == int(OC.MACA) and pilhas.get(onde, 0) > 1:
+                    self.desenhar_pilha(pilhas[onde], ox + i * cel, oy + j * cel, cel)
         # Seleção: moldura branca fina em volta da célula selecionada
         # (PROVISÓRIO, aguardando o dono do projeto).
         alvo = self.posicao_selecao()
@@ -490,6 +527,19 @@ class Genesis:
                 r = pygame.Rect(ox + sx * cel, oy + sy * cel, cel, cel)
                 pygame.draw.rect(self.tela, A.BRANCO, r, 1)
         self.tela.set_clip(anterior)
+
+    def desenhar_pilha(self, quantas: int, x: int, y: int, cel: int) -> None:
+        """O pequeno "xN" no canto de baixo da célula (pedido do dono)."""
+        tam = max(8, int(cel * A.FRACAO_FONTE_PILHA))
+        fonte = self._fontes_pilha.get(tam)
+        if fonte is None:
+            fonte = self._fontes_pilha[tam] = pygame.font.Font(A.FONTE_UI_NEGRITO, tam)
+        img = fonte.render(f"x{quantas}", True, A.COR_PILHA)
+        fundo = pygame.Surface((img.get_width() + 2, img.get_height()), pygame.SRCALPHA)
+        fundo.fill((0, 0, 0, 160))
+        bx, by = x + cel - fundo.get_width(), y + cel - fundo.get_height()
+        self.tela.blit(fundo, (bx, by))
+        self.tela.blit(img, (bx + 1, by))
 
     @staticmethod
     def texto_carregando(n) -> str:
@@ -525,8 +575,9 @@ class Genesis:
     def texto_estado(n) -> str:
         """Estado do NPC; indo a um lugar lembrado ganha "(memória)"."""
         texto = NOME_ESTADO[n.estado]
-        if n.estado == EST.COMENDO and n.comendo_da_mao:
-            return "comendo a maçã que carregava"
+        if n.estado == EST.COMENDO:
+            return ("comendo uma maçã que carregava", "comendo maçã do abrigo",
+                    "comendo maçã do chão")[n.comendo_de]
         if n.pela_memoria and n.estado in (EST.INDO_COMER, EST.INDO_BEBER):
             texto += " (memória)"
         return texto
@@ -547,9 +598,19 @@ class Genesis:
                                  cinza=(cod == int(OC.MACIEIRA_SECA)))
 
     def texto_idade(self, n) -> str:
-        if n.bebe:
-            return "bebê, " + duracao(self.mundo.tempo - n.nasceu)
-        return f"{int(self.mundo.idade_anos(n))} anos"
+        anos = int(self.mundo.idade_anos(n) + 1e-9)
+        if n.bebe and anos < 1:
+            fim = n.morreu_em if n.morreu_em >= 0 else self.mundo.tempo
+            return "bebê, " + duracao(fim - n.nascimento)
+        texto = f"{anos} ano{'s' if anos != 1 else ''}"
+        return ("bebê, " + texto) if n.bebe else texto
+
+    @staticmethod
+    def texto_nascimento(n) -> str:
+        d = gm.Mundo.data_de(n.nascimento)
+        if d.ano < 1:  # os do começo nasceram antes do ano 1
+            return "antes do ano 1"
+        return f"{data_texto(d)} {d.hora:02d}:{d.minuto:02d}"
 
     def nome_de(self, i: int) -> str:
         return self.mundo.npcs()[i].nome if i >= 0 else "—"
@@ -660,6 +721,8 @@ class Genesis:
             linhas = [n.nome,
                       f"Sexo: {'homem' if n.sexo == SEXO.HOMEM else 'mulher'}",
                       f"Idade: {self.texto_idade(n)}",
+                      f"Nascimento: {self.texto_nascimento(n)}",
+                      *([f"Vira adulto em: {relogio_de(n.quando_adulto)}"] if n.bebe else []),
                       f"Mãe: {self.nome_de(n.mae)}   Pai: {self.nome_de(n.pai)}",
                       f"Par: {self.nome_de(n.parceiro)}"
                       + (f"   Filhos: {n.filhos}" if n.filhos else ""),
@@ -668,7 +731,7 @@ class Genesis:
                       f"Sede: {n.sede:.0f}",
                       f"Estado: {self.texto_estado(n)}",
                       f"Carregando: {self.texto_carregando(n)}",
-                      *([f"Grávida: nasce em {duracao(n.quando_nascer - self.mundo.tempo)}"]
+                      *([f"Grávida: nasce em {relogio_de(n.quando_nascer)}"]
                         if n.gravida else []),
                       f"Trabalho: {self.texto_tarefa(n)}",
                       f"Abrigo: {self.texto_abrigo(n)}",
@@ -691,19 +754,27 @@ class Genesis:
             o = self.mundo.ocupante(x, y)
             agora = self.mundo.tempo
             if o in (OC.MACIEIRA, OC.MACIEIRA_SECA):
-                m = self.mundo.macieiras()[self.mundo.macieira_em(x, y)]
+                k = self.mundo.macieira_em(x, y)
+                m = self.mundo.macieiras()[k]
                 linhas = ["Macieira seca" if m.seca else "Macieira", pos,
                           f"Idade: {duracao(agora - m.nasceu)}"]
                 if m.seca:
-                    linhas.append(f"Some em: {duracao(m.quando_sumir - agora)}")
+                    linhas.append("Fase: seca (sem maçãs)")
+                    linhas.append(f"Some em: {relogio_de(m.quando_sumir)}")
                 else:
-                    linhas.append(f"Seca em: {duracao(m.quando_secar - agora)}")
+                    linhas.append(f"Fase: {FASE_MACIEIRA[self.mundo.estacao()]}")
+                    if m.macas_verao and self.mundo.estacao() == ESTACAO.VERAO:
+                        linhas.append(f"Maçãs neste verão: {m.macas_verao}")
+                        linhas.append(f"Ainda vão cair: {self.mundo.macas_por_cair(k)}")
+                    linhas.append(f"Seca em: {relogio_de(m.quando_secar)}")
                 # cor None = desenhar em cinza (macieira seca)
                 return "🌳", (None if m.seca else A.PRETO), linhas
             if o == OC.MACA:
-                falta = self.mundo.falta_virar_muda(x, y)
-                return "🍎", A.PRETO, ["Maçã", pos,
-                                       f"Vira muda em: {duracao(falta)}"]
+                vencem = self.mundo.macas_vencem(x, y)
+                return "🍎", A.PRETO, [
+                    f"Maçãs: {len(vencem)} (cabem {gm.MACAS_POR_PILHA})", pos,
+                    f"A próxima vence em: {duracao(vencem[0])}",
+                    "Ao vencer: 40% vira muda,", "60% apodrece"]
             if o == OC.PEDRA:
                 p = self.mundo.pedras()[self.mundo.pedra_em(x, y)]
                 return "⬟", A.COR_PEDRA_ENTIDADE, ["Pedra", pos,
@@ -714,16 +785,19 @@ class Genesis:
                 mor = ", ".join(nomes[i] for i in a.moradores) or "ninguém"
                 den = ", ".join(nomes[i] for i in a.dentro) or "ninguém"
                 return "🏠", A.PRETO, ["Abrigo", pos, f"Moradores: {mor}",
-                                       f"Dentro agora: {den}"]
+                                       f"Dentro agora: {den}",
+                                       f"Maçãs guardadas: {a.macas}/{gm.ABRIGO_MACAS_MAX}"]
             if o == OC.MUDA:
                 u = self.mundo.muda_em(x, y)
                 return "♣", A.COR_MUDA, ["Muda", pos,
                                          f"Idade: {duracao(agora - u.nasceu)}",
-                                         f"Vira macieira em: {duracao(u.quando_virar - agora)}"]
+                                         f"Vira macieira em: {relogio_de(u.quando_virar)}"]
         m = int(self.mundo.material(x, y, z))
         simb, cor, nome = MATERIAL[m]
         linhas = [nome, pos]
-        if m == int(MAT.AGUA):
+        if m in (int(MAT.AGUA), int(MAT.GELO)):
+            if m == int(MAT.GELO):
+                linhas.append("Água congelada: dá para andar, não para beber")
             nivel = self.mundo.nivel_agua(x, y, z)
             linhas.append(f"Nível da água: {nivel}/{gm.AGUA_NIVEL_MAX}"
                           f" ({nivel * 100 // gm.AGUA_NIVEL_MAX}%)")
@@ -748,7 +822,7 @@ class Genesis:
                              y, A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO,
                              A.TAM_SIMBOLO_GRANDE + 2 * A.ESPACO)
         # Materiais (letras coloridas) aparecem no fundo preto, como no mapa.
-        fundo = A.FUNDO_MAPA if simb and simb in "\"ndpa~♣⬟ " else A.FUNDO_CAMPO
+        fundo = A.FUNDO_MAPA if simb and simb in "\"ndpa~g♣⬟ " else A.FUNDO_CAMPO
         win98.caixa(self.tela, quadro, saliente=False, cor=fundo)
         if simb:
             # cor None = o símbolo em cinza (macieira seca)
@@ -764,13 +838,14 @@ class Genesis:
             y += self.fonte.get_height() + A.ESPACO
 
     def texto_temperatura(self) -> str:
-        periodo = "dia" if self.mundo.e_dia() else "noite"
+        periodo = "dia" if self.mundo.sol() else "noite"
         return f"{self.mundo.temperatura():.1f} °C ({periodo})"
 
     def texto_relogio(self) -> str:
-        """Dia e hora do jogo (1 h = 60 s; ver config.hpp)."""
-        r = self.mundo.relogio()
-        return f"Dia {r.dia}, {r.hora:02d}:{r.minuto:02d}"
+        """Data, hora e estação (pedido do dono: a estação aparece embaixo)."""
+        d = self.mundo.data()
+        return (f"{data_texto(d)} {d.hora:02d}:{d.minuto:02d}:{d.segundo:02d}"
+                f" — {NOME_ESTACAO[self.mundo.estacao()]}")
 
     def desenhar_status(self, r: pygame.Rect) -> None:
         """Barra de baixo: só o tempo e o nome do que está sob o mouse."""
@@ -792,9 +867,23 @@ class Genesis:
                             botao.top + A.ESPACO - 2 + desloca))
             self._botoes_velocidade.append((botao, mult))
             x += w + 2
+        # Se o computador não dá conta da velocidade pedida, mostra a real.
+        if self.velocidade > 1 and self.velocidade_real < 0.9 * self.velocidade:
+            x = self._campo_status(r, x, f"real: {self.texto_real()}")
         sob_mouse = self.nome_sob_mouse()
         if sob_mouse:
             self._campo_status(r, x, sob_mouse)
+
+    def texto_real(self) -> str:
+        """Velocidade de verdade, na unidade que fizer mais sentido."""
+        v = self.velocidade_real
+        if v >= gm.SEGUNDOS_POR_DIA:
+            return f"{v / gm.SEGUNDOS_POR_DIA:.1f} dia/s"
+        if v >= 3600:
+            return f"{v / 3600:.1f} h/s"
+        if v >= 60:
+            return f"{v / 60:.1f} min/s"
+        return f"{v:.1f} s/s"
 
     def _campo_status(self, r: pygame.Rect, x: int, p: str) -> int:
         """Um campo afundado da barra de baixo; devolve onde o próximo começa."""
@@ -809,8 +898,7 @@ class Genesis:
         """Clique num botão de velocidade. Devolve True se foi num deles."""
         for botao, mult in self._botoes_velocidade:
             if botao.collidepoint(pos):
-                # Clicar no que já está ligado volta ao tempo normal (1x).
-                self.velocidade = 1 if self.velocidade == mult else mult
+                self.velocidade = mult  # um botão sempre ligado (o escolhido)
                 return True
         return False
 
@@ -837,7 +925,8 @@ class Genesis:
         if cod == int(OC.ABRIGO):
             return "Abrigo"
         if cod == int(OC.MACA):
-            return "Maçã"
+            q = self.mundo.macas_em(x, y)
+            return "Maçã" if q == 1 else f"Maçãs (x{q})"
         return MATERIAL[cod - COD_MATERIAL][2]
 
     def desenhar_info(self, area: pygame.Rect) -> None:
@@ -848,11 +937,19 @@ class Genesis:
         zoom = "0,5x" if self.escala == 0.5 else f"{self.escala}x"
         secoes = [
             ("Simulação", [
-                f"Tempo: {self.texto_relogio()}  (1 hora do jogo = "
-                f"{gm.SEGUNDOS_POR_HORA:.0f} s)",
-                f"Velocidade: {self.velocidade}x",
-                f"Temperatura: {self.texto_temperatura()}",
-                f"Maçãs no chão: {len(self.mundo.macas())}",
+                f"Data: {self.texto_relogio()}",
+                f"Sol: nasce {hora_texto(gm.Mundo.nascer_do_sol(self.mundo.tempo))}, "
+                f"se põe {hora_texto(gm.Mundo.por_do_sol(self.mundo.tempo))} "
+                f"({hora_texto(gm.Mundo.horas_de_sol(self.mundo.tempo))} de sol)",
+                f"Velocidade: {NOME_VELOCIDADE[self.velocidade]}"
+                + (f" — de verdade: {self.texto_real()}" if self.velocidade > 1 else ""),
+                f"Temperatura: {self.texto_temperatura()}  (hoje: mín. "
+                f"{gm.Mundo.min_max_temperatura(self.mundo.tempo)[0]:.1f} °C, máx. "
+                f"{gm.Mundo.min_max_temperatura(self.mundo.tempo)[1]:.1f} °C)",
+                f"Maçãs no chão: {sum(q for _, _, q in self.mundo.pilhas())}",
+                f"Maçãs nos abrigos: {sum(a.macas for a in self.mundo.abrigos())}",
+                "Calendário: 1 s do jogo = 1 s real (na velocidade normal); "
+                "ano de 365 dias, 12 meses",
             ]),
             ("Vista", [
                 f"Nível z: {self.z_vista:+d}",
@@ -868,8 +965,9 @@ class Genesis:
                 "Rodinha nas abas NPCs e Histórico — rolar a lista",
                 "Arquivo → Nova simulação — escolher quantos homens e mulheres",
                 "Esc — fechar o menu",
-                ">  >>  >>>>  >>>>>>>>  (barra de baixo) — tempo 2x, 4x, 8x, 16x; "
-                "clicar de novo volta a 1x",
+                "||  >  >>  >>>  >>>>  (barra de baixo) — pausa, normal, "
+                "1 minuto/s, 1 hora/s, 1 dia/s",
+                "Espaço — pausa / continua",
             ]),
         ]
         x = campo.left + 3 * A.ESPACO
@@ -1046,6 +1144,11 @@ class Genesis:
                 self.z_vista = min(gm.Z_MAX, self.z_vista + 1)
             elif ev.key == pygame.K_i:
                 self.abas.ativa = (self.abas.ativa + 1) % len(self.abas.nomes)
+            elif ev.key == pygame.K_SPACE:  # pausa / continua (PROVISÓRIO)
+                if self.velocidade:
+                    self._antes_da_pausa, self.velocidade = self.velocidade, 0
+                else:
+                    self.velocidade = getattr(self, "_antes_da_pausa", 1)
 
     # ------------------------------------------------------------------
     # Laço principal
@@ -1055,12 +1158,36 @@ class Genesis:
         while self.rodando:
             for ev in pygame.event.get():
                 self.tratar_evento(ev)
-            # Tempo real: o motor anda exatamente o que passou no relógio,
-            # vezes a velocidade escolhida (1x, 2x, 4x ou 8x).
             dt_ms = relogio.tick(A.QUADROS_POR_SEGUNDO)
-            self.mundo.avancar(dt_ms / 1000.0 * self.velocidade)
+            self.andar_tempo(dt_ms / 1000.0)
             self.desenhar()
         pygame.quit()
+
+    def andar_tempo(self, dt_real: float) -> None:
+        """Anda o motor dt_real segundos reais × a velocidade escolhida.
+
+        Nas velocidades altas o motor pode não dar conta de tudo dentro do
+        quadro: ele anda em pedaços até gastar ORCAMENTO_MOTOR_MS e o resto é
+        deixado de lado (o tempo do jogo anda menos). A velocidade de
+        verdade fica em self.velocidade_real (média suave).
+        """
+        pedido = dt_real * self.velocidade
+        if pedido <= 0:
+            self.velocidade_real = 0.0
+            return
+        inicio = time.perf_counter()
+        limite = inicio + A.ORCAMENTO_MOTOR_MS / 1000.0
+        pedaco = max(pedido / 8, 1.0)
+        andou = 0.0
+        while andou < pedido:
+            passo = min(pedaco, pedido - andou)
+            self.mundo.avancar(passo)
+            andou += passo
+            if time.perf_counter() > limite:
+                break
+        if dt_real > 0:
+            agora = andou / dt_real
+            self.velocidade_real = 0.8 * self.velocidade_real + 0.2 * agora
 
 
 if __name__ == "__main__":

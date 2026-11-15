@@ -123,6 +123,23 @@ isso (`mundo.avancar(dt)`). 60 quadros por segundo = taxa do monitor do dono.
   Pessoas / Trabalho / Plantas; rodinha rola. Detalhes em
   [FAMILIA.md](FAMILIA.md).
 
+### Tempo e estações (motor 0.12)
+- Barra de baixo: **data, hora e estação** (`15/01/0001 13:00:00 — Verão`),
+  temperatura com "(dia)" ou "(noite)" pelo sol, e os botões
+  `||` (pausa), `>` (normal), `>>` (1 min/s), `>>>` (1 h/s), `>>>>` (1 dia/s).
+  **Espaço** pausa e continua. Se o computador não der conta, aparece a
+  velocidade real ("real: 0.6 dia/s").
+- Pilhas de maçã: pequeno **`xN`** no canto da célula (só quando há mais de
+  uma — PROVISÓRIO).
+- Gelo: **`g` azul-claro**.
+- Painéis: macieira mostra a **fase** (florescendo, dando frutos, folhas
+  secas, repouso, seca) e as maçãs do verão; pilha mostra quantas e quando a
+  próxima vence; abrigo mostra as **maçãs guardadas**; NPC mostra a **data
+  de nascimento** e, se bebê, quando vira adulto.
+- Histórico: nova categoria **Estações** (começo de cada estação, gelo).
+- Aba Info: data, nascer/pôr do sol, velocidade, mínima/máxima do dia,
+  maçãs no chão e nos abrigos.
+
 ## Valores PROVISÓRIOS (aguardando o dono do projeto)
 
 Estão em `interface/aparencia.py`:

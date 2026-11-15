@@ -1,5 +1,7 @@
 # Pedra, ferramentas, lenha e abrigo (motor 0.10)
 
+> **Mudou em 15/11/2026 (motor 0.12):** lascas 15–20 min, galhos 5–15 min, **machado agora leva 1–3 h** (onde ele estiver), corte 2–6 h, abrigo **2 a 4 dias** (continua de noite); o abrigo **guarda até 300 maçãs**; HP +1 por **minuto** dormindo. Os tempos antigos abaixo **não valem mais** — ver [TEMPO.md](TEMPO.md).
+
 Pedido pelo dono do projeto em 14/11/2026.
 
 ## Regras definidas pelo dono do projeto

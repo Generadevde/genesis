@@ -44,6 +44,36 @@ bool Mapa3D::e_terra(int x, int y) const {
            m == Material::Terra || m == Material::Pedra;
 }
 
+bool Mapa3D::e_gelo(int x, int y) const {
+    return material(x, y, superficie(x, y)) == Material::Gelo;
+}
+
+std::vector<int> Mapa3D::congelar(int x0, int y0, int x1, int y1) {
+    std::vector<int> r;
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x) {
+            const int z = superficie(x, y);
+            if (material(x, y, z) != Material::Agua) continue;
+            mat_[i3(x, y, z)] = Material::Gelo;  // o nível (agua_) fica guardado
+            r.push_back(y * largura() + x);
+        }
+    agua_parada_ = false;
+    return r;
+}
+
+std::vector<int> Mapa3D::degelar() {
+    std::vector<int> r;
+    for (int y = 0; y < altura(); ++y)
+        for (int x = 0; x < largura(); ++x) {
+            const int z = superficie(x, y);
+            if (material(x, y, z) != Material::Gelo) continue;
+            mat_[i3(x, y, z)] = Material::Agua;
+            r.push_back(y * largura() + x);
+        }
+    agua_parada_ = false;
+    return r;
+}
+
 void Mapa3D::recalcular_superficie(int x, int y) {
     int z = z_max();
     while (z > z_min() && material(x, y, z) == Material::Ar) --z;

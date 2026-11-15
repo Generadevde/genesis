@@ -1,5 +1,7 @@
 # Vida vegetal (motor 0.7)
 
+> **Mudou em 15/11/2026 (motor 0.12):** a maçã só cai no **verão** (80 a 300 por macieira, em curva); no chão elas formam **pilhas de até 32**; cada maçã esquecida 6 h tem **40% de virar muda** e 60% de apodrecer; muda vira macieira em **3 anos**; macieira vive **40 anos** e fica **1 ano** seca. As do começo têm 2 anos. O que está abaixo sobre tempos antigos (30–60 s, 3 dias, 7 dias, 4 h) **não vale mais** — ver [TEMPO.md](TEMPO.md).
+
 Pedida pelo dono do projeto em 14/11/2026. Usa o [sistema de tempo](TEMPO.md)
 (1 hora do jogo = 60 s).
 

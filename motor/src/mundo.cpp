@@ -17,18 +17,40 @@ namespace cfg = config;
 
 namespace {
 
-// Tipos de acontecimento das plantas (na fila).
+// Tipos de acontecimento (na fila).
 enum TipoEvento : int {
     QUEDA_MACA = 0,      // alvo = número da macieira
     MACIEIRA_SECA = 1,   // alvo = número da macieira
     MACIEIRA_SOME = 2,   // alvo = número da macieira
-    MACA_VIRA_MUDA = 3,  // alvo = célula da maçã
+    MACA_VENCE = 3,      // alvo = número da maçã no chão (6 h)
     MUDA_VIRA_ARVORE = 4, // alvo = id da muda
     VIRA_ADULTO = 5,      // alvo = id do bebê
     VELHICE = 6,          // alvo = id do NPC
     NASCIMENTO = 7,       // alvo = id da mãe
-    CONCEPCAO = 8         // alvo = id da mãe (1 h juntos no abrigo)
+    CONCEPCAO = 8,        // alvo = id da mãe (1 h juntos no abrigo)
+    ESTACAO = 9           // alvo = estação que começa (0 verão ... 3 primavera)
 };
+
+// Dia do ano (0 = 1º de janeiro) em que começa cada mês.
+int dia_do_ano(int mes, int dia) {
+    int d = 0;
+    for (int k = 0; k < mes - 1; ++k) d += cfg::DIAS_DO_MES[k];
+    return d + dia - 1;
+}
+
+// Mês (1–12) em que começa cada estação, na ordem do enum Estacao.
+constexpr int MES_DA_ESTACAO[4] = {cfg::VERAO_MES, cfg::OUTONO_MES,
+                                   cfg::INVERNO_MES, cfg::PRIMAVERA_MES};
+
+// Curva suave de 0 a 1 e de volta a 0 (pico no meio): sen²(π·f).
+// É a "curva gradual" do dono do projeto (forma escolhida: PROVISÓRIO).
+double curva_pico(double f) {
+    const double s = std::sin(M_PI * f);
+    return s * s;
+}
+
+// Passagem suave de 0 a 1 (f de 0 a 1): (1 − cos(π·f)) / 2.
+double curva_passagem(double f) { return (1.0 - std::cos(M_PI * f)) / 2.0; }
 
 // Margem de arredondamento para comparar tempos em ponto flutuante.
 // Não é regra do jogo: só evita que 0.9999999 deixe de contar como "venceu".
@@ -60,13 +82,14 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
     gerar_mundo(mapa_, semente);
     const size_t colunas = static_cast<size_t>(largura()) * altura();
     ocupacao_.assign(colunas, Ocupante::Nada);
-    origem_maca_.assign(colunas, -1);
+    pilha_.assign(colunas, {});
     contar_livres();
     falta_agua_ = cfg::AGUA_INTERVALO_S;
 
     // 6 macieiras em células de terra livres, sorteadas ("espalhadas").
-    // Todas nascem com idade 0 (decisão do dono do projeto).
-    for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i) nova_macieira(sortear_grama_livre());
+    // Começam com 2 anos (decisão do dono do projeto).
+    for (int i = 0; i < cfg::NUM_MACIEIRAS; ++i)
+        nova_macieira(sortear_grama_livre(), cfg::MACIEIRA_IDADE_INICIAL_ANOS);
 
     // 3 pedras em células de terra livres, cada uma com 10 lascas.
     for (int i = 0; i < cfg::NUM_PEDRAS; ++i) {
@@ -89,8 +112,8 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
         n.id = static_cast<int>(npcs_.size());
         n.nome = "NPC " + std::to_string(n.id + 1);
         n.sexo = sexos[i];
-        n.idade_ref_anos = cfg::IDADE_INICIAL_ANOS;
-        n.idade_ref_t = 0.0;
+        // Nasceu exatamente 20 anos antes do começo (mesma data e hora).
+        n.nascimento = -cfg::IDADE_INICIAL_ANOS * cfg::SEGUNDOS_POR_ANO;
         n.hp = cfg::HP_INICIAL;
         n.fome = cfg::FOME_INICIAL;
         n.sede = cfg::SEDE_INICIAL;
@@ -99,13 +122,26 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
         n.falta_sede = cfg::SEDE_INTERVALO_S;
         n.pos = sortear_grama_livre();
         ocupar(indice(n.pos), Ocupante::Npc);
-        // Morre de velhice aos 60 anos.
-        n.quando_velhice = (cfg::IDADE_MAXIMA_ANOS - cfg::IDADE_INICIAL_ANOS) *
-                           cfg::SEGUNDOS_POR_ANO;
+        // Morre de velhice aos 100 anos.
+        n.quando_velhice = n.nascimento + cfg::IDADE_MAXIMA_ANOS * cfg::SEGUNDOS_POR_ANO;
         agendar(n.quando_velhice, VELHICE, n.id);
         npcs_.push_back(n);
     }
     registrar(TipoRegistro::Inicio, homens, mulheres);
+
+    // Estações: o que vale na estação em que o mundo começa, e o começo de
+    // cada uma das próximas (cada uma se reagenda para o ano seguinte).
+    double ini = 0.0, fim = 0.0;
+    limites_estacao(tempo_, ini, fim);
+    const Estacao agora = estacao_de(tempo_);
+    if (agora == Estacao::Verao) comecar_verao(ini, fim);
+    if (agora == Estacao::Inverno) congelar_vales();
+    for (int e = 0; e < 4; ++e) {
+        const Data d = data_de(tempo_);
+        double quando = tempo_de(d.ano, MES_DA_ESTACAO[e], 1);
+        if (quando <= tempo_) quando = tempo_de(d.ano + 1, MES_DA_ESTACAO[e], 1);
+        agendar(quando, ESTACAO, e);
+    }
 }
 
 // Sorteia uma célula de grama ainda vazia (só a terra do meio é sorteada).
@@ -120,17 +156,18 @@ Pos Mundo::sortear_grama_livre() {
     }
 }
 
-// Uma macieira nova (do começo, ou que cresceu de uma muda): idade 0.
-void Mundo::nova_macieira(Pos p) {
+// Uma macieira nova: as do começo têm 2 anos; as que crescem de uma muda,
+// 0. Vive 40 anos (contados de quando virou árvore) e então seca.
+// Uma macieira que nasce no meio do verão só dá maçãs no verão seguinte
+// (PROVISÓRIO).
+void Mundo::nova_macieira(Pos p, double idade_anos) {
     Macieira m;
     m.pos = com_z(p);
-    m.nasceu = tempo_;
-    m.quando_queda = tempo_ + sortear_queda();
-    m.quando_secar = tempo_ + cfg::MACIEIRA_VIDA_DIAS * cfg::SEGUNDOS_POR_DIA;
+    m.nasceu = tempo_ - idade_anos * cfg::SEGUNDOS_POR_ANO;
+    m.quando_secar = m.nasceu + cfg::MACIEIRA_VIDA_ANOS * cfg::SEGUNDOS_POR_ANO;
     ocupar(indice(m.pos), Ocupante::Macieira);
     const int i = static_cast<int>(macieiras_.size());
     macieiras_.push_back(m);
-    agendar(m.quando_queda, QUEDA_MACA, i);
     agendar(m.quando_secar, MACIEIRA_SECA, i);
 }
 
@@ -156,9 +193,9 @@ void Mundo::agendar(double quando, int tipo, int alvo) {
     fila_.push({quando, tipo, alvo});
 }
 
-// Tempo até a próxima maçã: sorteado entre 30 e 60 s, a cada queda.
-double Mundo::sortear_queda() {
-    std::uniform_real_distribution<double> d(cfg::QUEDA_MIN_S, cfg::QUEDA_MAX_S);
+// Número sorteado entre `minimo` e `maximo` (durações dos trabalhos).
+double Mundo::sortear(double minimo, double maximo) {
+    std::uniform_real_distribution<double> d(minimo, maximo);
     return d(rng_);
 }
 
@@ -241,7 +278,7 @@ void Mundo::avancar(double dt) {
                 evento_passo(n);
             }
         }
-        // A cada 3 s: um passo da física da água.
+        // A cada 5 s: um passo da física da água.
         if (falta_agua_ <= EPS) {
             falta_agua_ += cfg::AGUA_INTERVALO_S;
             if (!mapa_.agua_parada()) {
@@ -257,8 +294,16 @@ void Mundo::avancar(double dt) {
                 case QUEDA_MACA: {
                     Macieira& m = macieiras_[e.alvo];
                     if (!m.existe || m.seca || e.quando != m.quando_queda) break;
-                    m.quando_queda += sortear_queda();
-                    agendar(m.quando_queda, QUEDA_MACA, e.alvo);
+                    // Próxima queda deste verão (se ainda houver).
+                    m.proxima_queda += 1;
+                    if (m.proxima_queda < m.quedas.size()) {
+                        m.quando_queda = m.quedas_base + m.quedas[m.proxima_queda];
+                        agendar(m.quando_queda, QUEDA_MACA, e.alvo);
+                    } else {
+                        m.quando_queda = -1.0;
+                        m.quedas.clear();
+                        m.proxima_queda = 0;
+                    }
                     evento_queda_maca(e.alvo);
                     break;
                 }
@@ -275,17 +320,17 @@ void Mundo::avancar(double dt) {
                     evento_macieira_some(m);
                     break;
                 }
-                case MACA_VIRA_MUDA: {
-                    auto it = quando_muda_.find(e.alvo);
-                    if (it == quando_muda_.end() || it->second != e.quando) break;
-                    evento_maca_vira_muda(e.alvo);
+                case MACA_VENCE: {
+                    auto it = macas_chao_.find(e.alvo);
+                    if (it == macas_chao_.end() || it->second.quando != e.quando) break;
+                    evento_maca_vence(e.alvo);
                     break;
                 }
                 case MUDA_VIRA_ARVORE:
                     if (mudas_.count(e.alvo)) evento_muda_vira_arvore(e.alvo);
                     break;
                 case VIRA_ADULTO:
-                    evento_adulto(e.alvo);
+                    if (e.quando == npcs_[e.alvo].quando_adulto) evento_adulto(e.alvo);
                     break;
                 case VELHICE:
                     if (e.quando == npcs_[e.alvo].quando_velhice) evento_velhice(e.alvo);
@@ -297,6 +342,9 @@ void Mundo::avancar(double dt) {
                         evento_nascimento(e.alvo);
                     break;
                 }
+                case ESTACAO:
+                    evento_estacao(e.alvo);
+                    break;
                 case CONCEPCAO: {
                     const Npc& m = npcs_[e.alvo];
                     if (m.procriando_desde >= 0.0 &&
@@ -313,7 +361,7 @@ void Mundo::avancar(double dt) {
 // Acontecimentos
 // ===========================================================================
 
-// A cada 5 s: fome abaixa 3, até 0.
+// A cada 15 min: fome abaixa 3, até 0.
 // Enquanto está comendo, a fome NÃO abaixa (pedido do dono do projeto).
 void Mundo::evento_fome(Npc& n) {
     // Comendo, ou dentro do abrigo ("dentro não faz fome"): não abaixa.
@@ -322,7 +370,7 @@ void Mundo::evento_fome(Npc& n) {
     n.fome = std::max(cfg::FOME_MINIMA, n.fome - cfg::FOME_QUEDA);
 }
 
-// A cada 5 s: sede abaixa 4, até 0.
+// A cada 10 min: sede abaixa 4, até 0.
 // Enquanto está bebendo, a sede NÃO abaixa.
 void Mundo::evento_sede(Npc& n) {
     // Bebendo, a sede não abaixa; comendo maçã também não (a maçã mata a
@@ -334,7 +382,7 @@ void Mundo::evento_sede(Npc& n) {
     n.sede = std::max(cfg::SEDE_MINIMA, n.sede - cfg::SEDE_QUEDA);
 }
 
-// A cada 1 s: o NPC decide e dá (no máximo) um passo.
+// A cada 5 s: o NPC decide e dá (no máximo) um passo.
 //
 // Ordem de decisão (definida pelo dono do projeto):
 //   - Com fome < 70 e sede < 50 ao mesmo tempo: tenta primeiro a mais URGENTE
@@ -399,8 +447,11 @@ void Mundo::evento_passo(Npc& n) {
     // --- Necessidade secundária: reprodução (o casal vai ao abrigo dele) ---
     if (tentar_procriar(n)) return;
 
-    // --- Sem precisar comer/beber: se vê uma maçã e tem a mão livre, vai
-    //     pegar para levar consigo (pedido do dono do projeto).
+    // --- Saciado com maçãs na mão: leva para o abrigo dele.
+    if (tentar_guardar(n)) return;
+
+    // --- Saciado: se vê maçãs e tem lugar na mão, vai pegar (pedido do
+    //     dono do projeto) — para levar ao abrigo.
     if (tentar_pegar(n)) return;
 
     // --- Nada a resolver, ou nada à vista: explora ---------------------
@@ -449,7 +500,8 @@ bool Mundo::sortear_destino(Npc& n) {
     std::vector<Pos> opcoes;
     auto testar = [&](int x, int y) {
         Pos p{x, y};
-        if (dentro(p) && mapa_.e_terra(x, y)) opcoes.push_back(com_z(p));
+        if (dentro(p) && (mapa_.e_terra(x, y) || mapa_.e_gelo(x, y)))
+            opcoes.push_back(com_z(p));
     };
     for (int dx = -r; dx <= r; ++dx) {
         testar(n.pos.x + dx, n.pos.y - r);
@@ -466,17 +518,41 @@ bool Mundo::sortear_destino(Npc& n) {
     return true;
 }
 
-// Procura a maçã mais próxima à vista. Se está ao lado, começa a comer;
-// senão, dá um passo na direção dela. Devolve falso se não viu maçã.
+// A maçã sai de onde estava (mão, abrigo ou chão) e ele come por 3 min.
+void Mundo::comecar_a_comer(Npc& n, int de) {
+    n.estado = EstadoNpc::Comendo;
+    n.comendo = true;
+    n.comendo_de = de;
+    n.tem_alvo = false;
+    n.pela_memoria = false;
+    n.falta_acao = cfg::COMER_DURACAO_S;
+}
+
+// Com fome (decisão do dono do projeto): come primeiro uma das maçãs que
+// carrega; se não tem, a de um abrigo (qualquer um pode comer de qualquer
+// abrigo); senão, uma do chão; senão, vai a uma macieira lembrada.
+// Devolve falso se não achou nada para comer.
 bool Mundo::tentar_comer(Npc& n) {
-    // Carregando uma maçã? Come ela na hora, sem procurar (decisão do dono).
     if (n.macas_carregadas > 0) {
-        n.estado = EstadoNpc::Comendo;
-        n.comendo_da_mao = true;
-        n.tem_alvo = false;
-        n.pela_memoria = false;
-        n.falta_acao = cfg::COMER_DURACAO_S;
+        n.macas_carregadas -= 1;
+        comecar_a_comer(n, 0);
         return true;
+    }
+    int ab = -1;
+    if (procurar_abrigo_com_macas(n, ab)) {
+        const Abrigo& a = abrigos_[ab];
+        const int desnivel = std::abs(a.pos.z - n.pos.z);
+        if (distancia_passos(n.pos, a.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX) {
+            abrigos_[ab].macas -= 1;
+            comecar_a_comer(n, 1);
+            return true;
+        }
+        n.estado = EstadoNpc::IndoComer;
+        n.alvo = a.pos;
+        n.tem_alvo = true;
+        n.pela_memoria = false;
+        if (passo_em_direcao(n, a.pos)) return true;
+        // Sem caminho até o abrigo: tenta o chão.
     }
     Pos maca;
     // Primeiro o que ele VÊ agora; se não vê maçã, usa a memória.
@@ -485,30 +561,56 @@ bool Mundo::tentar_comer(Npc& n) {
     n.alvo = maca;
     n.tem_alvo = true;
     n.pela_memoria = false;
-    // A maçã ocupa a célula dela, então o NPC come de uma célula vizinha.
+    // A pilha ocupa a célula dela, então o NPC come de uma célula vizinha.
     if (distancia_passos(n.pos, maca) == 1) {
-        reservas_[indice(maca)] = n.id;
-        n.estado = EstadoNpc::Comendo;
-        n.falta_acao = cfg::COMER_DURACAO_S;
+        const int origem = tirar_maca_do_chao(indice(maca));
+        lembrar_macieira(n, origem);
+        n.macieiras_vistas_vazias.clear();
+        comecar_a_comer(n, 2);
         return true;
     }
     passo_em_direcao(n, maca);
     return true;
 }
 
-// Vê uma maçã e ainda pode carregar? Vai até ela; ao lado, pega na hora
-// (a maçã sai do chão e vai para a mão). Ao pegar, já lembra a macieira de
-// onde ela caiu (decisão do dono). Devolve falso se não vai pegar nada.
+// O abrigo (com maçãs guardadas) para ir comer: o dele, se tem maçãs; senão
+// o mais perto que ele vê (32 x 32) — PROVISÓRIO.
+bool Mundo::procurar_abrigo_com_macas(const Npc& n, int& abrigo) const {
+    if (n.abrigo_casa >= 0 && abrigos_[n.abrigo_casa].macas > 0) {
+        abrigo = n.abrigo_casa;
+        return true;
+    }
+    const int metade = cfg::VISAO_LADO / 2;
+    int melhor_d = -1;
+    for (int a = 0; a < static_cast<int>(abrigos_.size()); ++a) {
+        const Abrigo& ab = abrigos_[a];
+        if (ab.macas <= 0) continue;
+        const int dx = ab.pos.x - n.pos.x, dy = ab.pos.y - n.pos.y;
+        if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
+        const int d = distancia_passos(n.pos, ab.pos);
+        if (melhor_d < 0 || d < melhor_d) { melhor_d = d; abrigo = a; }
+    }
+    return melhor_d >= 0;
+}
+
+// Saciado e vendo maçãs (pedido do dono do projeto): vai até a pilha e, ao
+// lado dela, pega na hora todas que couberem na mão (até 16) — mesmo que
+// sejam menos. Depois leva para o abrigo (ver tentar_guardar). Se o abrigo
+// dele está cheio (300), não pega. Sem abrigo, só carrega.
+// Ao pegar, lembra a macieira de onde cada maçã caiu.
 bool Mundo::tentar_pegar(Npc& n) {
-    if (n.macas_carregadas >= cfg::MACAS_CARREGAVEIS) return false;
+    const int cabe = cfg::MACAS_CARREGAVEIS - n.macas_carregadas;
+    if (cabe <= 0) return false;
+    if (n.abrigo_casa >= 0 && abrigos_[n.abrigo_casa].macas >= cfg::ABRIGO_MACAS_MAX)
+        return false;
     Pos maca;
     if (!procurar_maca(n, maca)) return false;
     if (distancia_passos(n.pos, maca) == 1) {
         const int i = indice(maca);
-        n.macas_carregadas += 1;
-        n.origem_carregada = origem_maca_[i];
-        tirar_maca_do_chao(i);
-        lembrar_macieira(n, n.origem_carregada);
+        for (int k = 0; k < cabe && !pilha_[i].empty(); ++k) {
+            lembrar_macieira(n, tirar_maca_do_chao(i));
+            n.macas_carregadas += 1;
+        }
         n.estado = EstadoNpc::Vagando;
         n.tem_alvo = false;
         n.pela_memoria = false;
@@ -519,6 +621,31 @@ bool Mundo::tentar_pegar(Npc& n) {
     n.tem_alvo = true;
     n.pela_memoria = false;
     passo_em_direcao(n, maca);
+    return true;
+}
+
+// Com maçãs na mão e um abrigo: leva para lá. Ao lado do abrigo, guarda na
+// hora as que couberem (até 300); as que não couberem ele deixa no chão
+// onde está (em volta dele).
+bool Mundo::tentar_guardar(Npc& n) {
+    if (n.macas_carregadas <= 0 || n.abrigo_casa < 0) return false;
+    Abrigo& ab = abrigos_[n.abrigo_casa];
+    const int desnivel = std::abs(ab.pos.z - n.pos.z);
+    if (distancia_passos(n.pos, ab.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX) {
+        const int guarda = std::min(n.macas_carregadas, cfg::ABRIGO_MACAS_MAX - ab.macas);
+        ab.macas += guarda;
+        n.macas_carregadas -= guarda;
+        while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, -1))
+            n.macas_carregadas -= 1;
+        n.macas_carregadas = 0;  // se nem no chão couber, perdem-se
+        n.estado = EstadoNpc::Vagando;
+        n.tem_alvo = false;
+        return true;
+    }
+    n.estado = EstadoNpc::IndoGuardar;
+    n.tem_alvo = true;
+    n.alvo = ab.pos;
+    if (!passo_em_direcao(n, ab.pos)) return false;  // sem caminho: segue a vida
     return true;
 }
 
@@ -690,33 +817,16 @@ std::vector<int> Mundo::distancias(Pos de) const {
     return d;
 }
 
-// Terminou os 10 s comendo: a maçã some, a fome sobe 12 e a sede sobe 5
-// (até 100).
+// Terminou os 3 min comendo: a fome sobe 12 e a sede sobe 5 (até 100).
 void Mundo::evento_fim_comer(Npc& n) {
-    if (n.comendo_da_mao) {  // comeu a maçã que carregava
-        n.comendo_da_mao = false;
-        n.macas_carregadas -= 1;
-        n.origem_carregada = -1;
-        n.macieiras_vistas_vazias.clear();
-        n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
-        n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::MACA_RECUPERA_SEDE);
-        n.estado = EstadoNpc::Vagando;
-        n.tem_alvo = false;
-        return;
-    }
-    const int i = indice(n.alvo);
-    // Memória: lembra a macieira de onde veio esta maçã (se ainda não lembra).
-    lembrar_macieira(n, origem_maca_[i]);
-    n.macieiras_vistas_vazias.clear();  // comeu: a busca recomeça do zero
-    reservas_.erase(i);
-    tirar_maca_do_chao(i);
+    n.comendo = false;
     n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
     n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::MACA_RECUPERA_SEDE);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
 }
 
-// Terminou os 10 s bebendo: a sede sobe 15 (até 100). A água não acaba.
+// Terminou os 20 s bebendo: a sede sobe 15 (até 100). A água não acaba.
 void Mundo::evento_fim_beber(Npc& n) {
     n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::GOLE_RECUPERA);
     // Memória: lembra a célula de água onde bebeu (se ainda não lembra).
@@ -755,46 +865,113 @@ bool Mundo::camada_livres(Pos centro, int r, std::vector<Pos>& livres) const {
 
 // --- Vida vegetal -------------------------------------------------------
 
-// Toda maçã que vai para o chão passa por aqui: marca a célula, guarda de
-// qual macieira veio e começa a contar as 6 horas para virar muda.
-// (Maçã que foi pegada e solta de novo recomeça a contagem.)
+// Toda maçã NOVA no chão passa por aqui (caiu da árvore, ou alguém soltou):
+// entra na pilha da célula e começa a contar as suas 6 horas.
+// (Maçã pegada e solta de novo recomeça a contagem.)
 void Mundo::por_maca_no_chao(int i, int origem) {
-    ocupar(i, Ocupante::Maca);
-    origem_maca_[i] = origem;
-    quando_muda_[i] = tempo_ + cfg::MACA_VIRA_MUDA_H * cfg::SEGUNDOS_POR_HORA;
-    agendar(quando_muda_[i], MACA_VIRA_MUDA, i);
+    MacaChao m;
+    m.celula = i;
+    m.origem = origem;
+    m.quando = tempo_ + cfg::MACA_VIRA_MUDA_H * cfg::SEGUNDOS_POR_HORA;
+    const int id = proximo_id_maca_++;
+    macas_chao_[id] = m;
+    pilha_[i].push_back(id);
+    if (ocupacao_[i] != Ocupante::Maca) ocupar(i, Ocupante::Maca);
+    agendar(m.quando, MACA_VENCE, id);
 }
 
-// Toda maçã que sai do chão (pegada ou comida) passa por aqui.
-void Mundo::tirar_maca_do_chao(int i) {
-    ocupar(i, Ocupante::Nada);
-    origem_maca_[i] = -1;
-    quando_muda_.erase(i);
+// Uma maçã que já existe muda de célula (a pilha virou muda): continua com
+// as mesmas 6 horas de antes.
+void Mundo::por_maca_existente(int id, int i) {
+    macas_chao_[id].celula = i;
+    pilha_[i].push_back(id);
+    if (ocupacao_[i] != Ocupante::Maca) ocupar(i, Ocupante::Maca);
 }
 
-// 6 horas no chão sem ninguém pegar: a maçã vira muda na mesma célula.
-// Se alguém está comendo ela neste momento, espera: ou ela é comida, ou
-// (se quem comia morrer) vira muda nessa hora — ver Mundo::morrer.
-void Mundo::evento_maca_vira_muda(int i) {
-    if (reservas_.count(i)) return;
-    quando_muda_.erase(i);
-    origem_maca_[i] = -1;
+// Tira a maçã de cima da pilha. Se a pilha acabou, a célula fica livre.
+int Mundo::tirar_maca_do_chao(int i) {
+    if (pilha_[i].empty()) return -1;
+    const int id = pilha_[i].back();
+    pilha_[i].pop_back();
+    const int origem = macas_chao_[id].origem;
+    macas_chao_.erase(id);
+    if (pilha_[i].empty()) ocupar(i, Ocupante::Nada);
+    return origem;
+}
+
+// Lugar para uma maçã em volta de `centro`: na primeira camada (1 = as 8
+// vizinhas; depois a 2...) que tenha célula de terra vazia ou pilha com
+// menos de 32. Dentro da camada, a célula é sorteada.
+int Mundo::lugar_para_maca(Pos centro) {
+    std::vector<int> opcoes;
+    for (int r = 1;; ++r) {
+        if (centro.x - r < 0 && centro.y - r < 0 && centro.x + r >= largura() &&
+            centro.y + r >= altura())
+            return -1;  // passou do mapa todo
+        opcoes.clear();
+        auto testar = [&](int x, int y) {
+            Pos p{x, y};
+            if (!dentro(p)) return;
+            const int i = indice(p);
+            if (livre(p) || (ocupacao_[i] == Ocupante::Maca &&
+                             static_cast<int>(pilha_[i].size()) < cfg::MACAS_POR_PILHA))
+                opcoes.push_back(i);
+        };
+        for (int dx = -r; dx <= r; ++dx) {
+            testar(centro.x + dx, centro.y - r);
+            testar(centro.x + dx, centro.y + r);
+        }
+        for (int dy = -r + 1; dy <= r - 1; ++dy) {
+            testar(centro.x - r, centro.y + dy);
+            testar(centro.x + r, centro.y + dy);
+        }
+        if (!opcoes.empty()) {
+            std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
+            return opcoes[d(rng_)];
+        }
+    }
+}
+
+// 6 horas no chão sem ninguém pegar (decisão do dono do projeto): 40% de
+// chance de virar muda; senão apodrece e some. Se vira muda, ela fica na
+// célula da pilha e as outras maçãs da pilha vão para as células vizinhas
+// (cada uma com as suas 6 horas). Numa célula só cabe uma muda.
+void Mundo::evento_maca_vence(int id) {
+    const int i = macas_chao_.at(id).celula;
+    auto& p = pilha_[i];
+    p.erase(std::find(p.begin(), p.end(), id));
+    macas_chao_.erase(id);
+    std::bernoulli_distribution vira_muda(cfg::MACA_CHANCE_MUDA);
+    if (!vira_muda(rng_)) {  // apodreceu
+        if (p.empty()) ocupar(i, Ocupante::Nada);
+        return;
+    }
+    // Vira muda: as outras saem da célula primeiro.
+    const std::vector<int> resto = p;
+    p.clear();
     ocupar(i, Ocupante::Muda);
+    const Pos aqui = com_z({i % largura(), i / largura()});
+    for (int outra : resto) {
+        const int j = lugar_para_maca(aqui);
+        if (j >= 0) por_maca_existente(outra, j);
+        else macas_chao_.erase(outra);  // não coube em lugar nenhum
+    }
     Muda u;
     u.id = proximo_id_muda_++;
-    u.pos = com_z({i % largura(), i / largura()});
+    u.pos = aqui;
     u.nasceu = tempo_;
-    u.quando_virar = tempo_ + cfg::MUDA_VIRA_ARVORE_DIAS * cfg::SEGUNDOS_POR_DIA;
+    u.quando_virar = tempo_ + cfg::MUDA_VIRA_ARVORE_ANOS * cfg::SEGUNDOS_POR_ANO;
     mudas_[u.id] = u;
     agendar(u.quando_virar, MUDA_VIRA_ARVORE, u.id);
     registrar(TipoRegistro::MudaNasceu, -1, -1, -1, u.pos);
 }
 
-// 3 dias depois: a muda vira macieira (idade 0, derruba maçãs normalmente).
+// 3 anos depois: a muda vira macieira (idade 0).
 void Mundo::evento_muda_vira_arvore(int id) {
     const Pos p = mudas_.at(id).pos;
     mudas_.erase(id);
-    nova_macieira(p);
+    ocupar(indice(p), Ocupante::Nada);
+    nova_macieira(p, 0.0);
     registrar(TipoRegistro::ArvoreNasceu, -1, -1, -1, p);
 }
 
@@ -805,18 +982,22 @@ std::vector<Muda> Mundo::mudas() const {
     return r;
 }
 
-// 7 dias de vida: a macieira seca (cinza) e para de derrubar maçãs.
+// 40 anos de vida: a macieira seca (cinza) e não dá mais maçãs.
 void Mundo::evento_macieira_seca(Macieira& m) {
     m.seca = true;
-    m.quando_sumir = tempo_ + cfg::MACIEIRA_SECA_H * cfg::SEGUNDOS_POR_HORA;
+    m.quando_sumir = tempo_ + cfg::MACIEIRA_SECA_ANOS * cfg::SEGUNDOS_POR_ANO;
+    m.quedas.clear();
+    m.quando_queda = -1.0;
     ocupar(indice(m.pos), Ocupante::MacieiraSeca);
     registrar(TipoRegistro::ArvoreSecou, -1, -1, -1, m.pos);
 }
 
-// 4 horas seca: some. A célula fica livre. (Fica na lista com existe =
+// 1 ano seca: some. A célula fica livre. (Fica na lista com existe =
 // false, para os números das outras macieiras não mudarem.)
 void Mundo::evento_macieira_some(Macieira& m) {
     m.existe = false;
+    m.quedas.clear();
+    m.quando_queda = -1.0;
     ocupar(indice(m.pos), Ocupante::Nada);
     registrar(TipoRegistro::ArvoreSumiu, -1, -1, -1, m.pos);
 }
@@ -835,20 +1016,133 @@ const Muda* Mundo::muda_em(int x, int y) const {
 }
 
 double Mundo::falta_virar_muda(int x, int y) const {
-    auto it = quando_muda_.find(indice({x, y}));
-    return it == quando_muda_.end() ? -1.0 : it->second - tempo_;
+    const auto v = macas_vencem(x, y);
+    return v.empty() ? -1.0 : v.front();
+}
+
+int Mundo::macas_em(int x, int y) const {
+    return static_cast<int>(pilha_[indice({x, y})].size());
+}
+
+std::vector<std::array<int, 3>> Mundo::pilhas() const {
+    std::vector<std::array<int, 3>> r;
+    for (int i = 0; i < static_cast<int>(pilha_.size()); ++i)
+        if (!pilha_[i].empty())
+            r.push_back({i % largura(), i / largura(), static_cast<int>(pilha_[i].size())});
+    return r;
+}
+
+std::vector<double> Mundo::macas_vencem(int x, int y) const {
+    std::vector<double> r;
+    for (int id : pilha_[indice({x, y})]) r.push_back(macas_chao_.at(id).quando - tempo_);
+    std::sort(r.begin(), r.end());
+    return r;
+}
+
+int Mundo::macas_por_cair(int k) const {
+    const Macieira& m = macieiras_[k];
+    if (!m.existe || m.seca || m.quedas.empty()) return 0;
+    return static_cast<int>(m.quedas.size() - m.proxima_queda);
+}
+
+// ===========================================================================
+// Estações, maçãs do verão e gelo
+// ===========================================================================
+
+// Começou uma estação: registra, faz o que ela traz e agenda a do ano que vem.
+void Mundo::evento_estacao(int e) {
+    registrar(TipoRegistro::Estacao, e);
+    double ini = 0.0, fim = 0.0;
+    limites_estacao(tempo_, ini, fim);
+    if (e == static_cast<int>(Estacao::Verao)) comecar_verao(ini, fim);
+    if (e == static_cast<int>(Estacao::Inverno)) congelar_vales();
+    if (e == static_cast<int>(Estacao::Primavera)) degelar_vales();
+    const Data d = data_de(tempo_);
+    agendar(tempo_de(d.ano + 1, MES_DA_ESTACAO[e], 1), ESTACAO, e);
+}
+
+// Verão: cada macieira viva sorteia quantas maçãs vai derrubar (80 a 300) e
+// quando cada uma cai: do 2º dia do verão até o fim dele, mais no meio
+// (curva sen², a mesma do dia — PROVISÓRIO).
+void Mundo::comecar_verao(double inicio, double fim) {
+    for (int k = 0; k < static_cast<int>(macieiras_.size()); ++k)
+        if (macieiras_[k].existe && !macieiras_[k].seca) gerar_quedas(k, inicio, fim);
+}
+
+void Mundo::gerar_quedas(int k, double inicio, double fim) {
+    Macieira& m = macieiras_[k];
+    std::uniform_int_distribution<int> quantas(cfg::MACAS_POR_VERAO_MIN,
+                                               cfg::MACAS_POR_VERAO_MAX);
+    m.macas_verao = quantas(rng_);
+    // "Começam a cair no 2º dia do verão": a partir das 00:00 do dia 2.
+    const double de = inicio + (cfg::QUEDA_COMECA_DIA_DO_VERAO - 1) * cfg::SEGUNDOS_POR_DIA;
+    const double janela = fim - de;
+    std::uniform_real_distribution<double> u01(0.0, 1.0);
+    m.quedas.clear();
+    m.proxima_queda = 0;
+    m.quedas_base = de;
+    for (int q = 0; q < m.macas_verao; ++q) {
+        double f;  // sorteia f com chance proporcional à curva (rejeição)
+        do f = u01(rng_); while (u01(rng_) > curva_pico(f));
+        const double t = de + f * janela;
+        if (t > tempo_) m.quedas.push_back(static_cast<float>(f * janela));
+    }
+    std::sort(m.quedas.begin(), m.quedas.end());
+    if (m.quedas.empty()) { m.quando_queda = -1.0; return; }
+    m.quando_queda = m.quedas_base + m.quedas[0];
+    agendar(m.quando_queda, QUEDA_MACA, k);
+}
+
+// Inverno: a camada de cima da água dos vales congela. "Vale" = água dentro
+// da terra; o mar (a borda de 8 células) não congela — PROVISÓRIO.
+void Mundo::congelar_vales() {
+    const int b = cfg::BORDA_AGUA;
+    const auto col = mapa_.congelar(b, b, largura() - b, altura() - b);
+    if (!col.empty()) registrar(TipoRegistro::Congelou, static_cast<int>(col.size()));
+}
+
+// Fim do inverno: o gelo volta a ser água. Quem está em cima do gelo vai
+// para a terra livre mais perto (PROVISÓRIO).
+void Mundo::degelar_vales() {
+    const auto col = mapa_.degelar();
+    if (col.empty()) return;
+    tirar_de_cima_do_gelo(col);
+    contar_livres();
+    registrar(TipoRegistro::Derreteu, static_cast<int>(col.size()));
+}
+
+void Mundo::tirar_de_cima_do_gelo(const std::vector<int>& colunas) {
+    for (int i : colunas) {
+        const Ocupante o = ocupacao_[i];
+        if (o == Ocupante::Nada) continue;
+        const Pos aqui = com_z({i % largura(), i / largura()});
+        Pos fora;
+        const bool tem = lugar_livre_perto(aqui, fora);
+        ocupacao_[i] = Ocupante::Nada;  // (era gelo: não conta como terra livre)
+        if (!tem) continue;
+        fora = com_z(fora);
+        for (Npc& n : npcs_)
+            if (n.dentro_abrigo < 0 && n.pos.x == aqui.x && n.pos.y == aqui.y) {
+                n.pos = fora;
+                n.tem_destino = false;
+            }
+        ocupar(indice(fora), o);
+    }
 }
 
 // ===========================================================================
 // Abrigo e trabalho (pedra, galhos, machado, corte, construção)
 // ===========================================================================
 
-double Mundo::duracao_tarefa(Tarefa t) const {
+// Quanto tempo leva o trabalho: sorteado a cada vez, entre o mínimo e o
+// máximo do dono do projeto (ver config.hpp).
+double Mundo::duracao_tarefa(Tarefa t) {
     switch (t) {
-        case Tarefa::Lascas: return cfg::TIRAR_LASCAS_S;
-        case Tarefa::Galhos: return cfg::TIRAR_GALHOS_S;
-        case Tarefa::Cortar: return cfg::CORTAR_H * cfg::SEGUNDOS_POR_HORA;
-        case Tarefa::Construir: return cfg::CONSTRUIR_H * cfg::SEGUNDOS_POR_HORA;
+        case Tarefa::Lascas: return sortear(cfg::LASCAS_MIN_S, cfg::LASCAS_MAX_S);
+        case Tarefa::Galhos: return sortear(cfg::GALHOS_MIN_S, cfg::GALHOS_MAX_S);
+        case Tarefa::Machado: return sortear(cfg::MACHADO_MIN_S, cfg::MACHADO_MAX_S);
+        case Tarefa::Cortar: return sortear(cfg::CORTAR_MIN_S, cfg::CORTAR_MAX_S);
+        case Tarefa::Construir: return sortear(cfg::CONSTRUIR_MIN_S, cfg::CONSTRUIR_MAX_S);
         default: return 0.0;
     }
 }
@@ -921,12 +1215,22 @@ void Mundo::sair_abrigo(Npc& n) {
     }
 }
 
-// Segundos até a temperatura ficar abaixo de 4° (0 se já está).
+// Segundos até a temperatura ficar abaixo de 4° (0 se já está). Se não
+// fica nas próximas 24 h, conta como 24 h. O resultado fica guardado (e
+// vale até o momento achado, ou por 1 hora se não achou), porque procurar
+// de minuto em minuto a cada passo do NPC sairia caro.
 double Mundo::ate_critico_frio() const {
     if (temperatura() < cfg::TEMP_CRITICA) return 0.0;
-    const double passo = cfg::SEGUNDOS_POR_HORA / 60.0;  // 1 minuto do jogo
+    if (tempo_ < critico_valido_ate_) return std::max(0.0, critico_em_ - tempo_);
+    const double passo = cfg::SEGUNDOS_POR_MINUTO;  // 1 minuto do jogo
     for (double t = passo; t <= cfg::SEGUNDOS_POR_DIA; t += passo)
-        if (temperatura_em(tempo_ + t) < cfg::TEMP_CRITICA) return t;
+        if (temperatura_em(tempo_ + t) < cfg::TEMP_CRITICA) {
+            critico_em_ = tempo_ + t;
+            critico_valido_ate_ = critico_em_;
+            return t;
+        }
+    critico_em_ = tempo_ + cfg::SEGUNDOS_POR_DIA;
+    critico_valido_ate_ = tempo_ + cfg::SEGUNDOS_POR_HORA;
     return cfg::SEGUNDOS_POR_DIA;
 }
 
@@ -940,13 +1244,26 @@ bool Mundo::cadeia_abrigo(Npc& n) {
 }
 
 // Qual o próximo trabalho para chegar ao abrigo?
-//   lenha >= 20 -> construir aqui;  machado -> cortar uma árvore;
+//   lenha >= 20 -> construir aqui (no gelo não: na terra livre mais perto);
+//   6 lascas e 2 galhos, sem machado -> fazer o machado (onde está, 1 a 3 h);
+//   machado -> cortar uma árvore;
 //   senão: lascas (até 6) e galhos (até 2) para o machado — o que estiver
 //   mais perto entre os dois que faltam.
 bool Mundo::escolher_tarefa(Npc& n) {
-    fazer_machado(n);
     if (n.lenha >= cfg::ABRIGO_LENHA) {
         n.tarefa = Tarefa::Construir;
+        n.tarefa_pos = n.pos;
+        if (mapa_.e_gelo(n.pos.x, n.pos.y)) {
+            Pos terra;
+            if (!lugar_livre_perto(n.pos, terra)) return false;
+            n.tarefa_pos = com_z(terra);
+        }
+        n.tarefa_alvo = -1;
+        n.tarefa_restante = 0.0;
+        return true;
+    }
+    if (!n.machado && n.lascas >= cfg::MACHADO_LASCAS && n.galhos >= cfg::MACHADO_GALHOS) {
+        n.tarefa = Tarefa::Machado;
         n.tarefa_pos = n.pos;
         n.tarefa_alvo = -1;
         n.tarefa_restante = 0.0;
@@ -982,6 +1299,24 @@ bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
                              Pos& onde) const {
     // "Mais perto" = menos passos A PÉ até ficar ao lado (só os que dá para
     // alcançar). Primeiro os que ele VÊ (32 x 32); se nenhum, os que LEMBRA.
+    // Antes de calcular os caminhos (caro), vê se existe algum candidato.
+    const int metade = cfg::VISAO_LADO / 2;
+    {
+        bool algum = false;
+        for (int dy = -metade; dy < metade && !algum; ++dy)
+            for (int dx = -metade; dx < metade; ++dx) {
+                Pos p{n.pos.x + dx, n.pos.y + dy};
+                if (!dentro(p)) continue;
+                const Ocupante o = ocupacao_[indice(p)];
+                if (pedra ? (o == Ocupante::Pedra)
+                          : (o == Ocupante::Macieira || o == Ocupante::MacieiraSeca)) {
+                    algum = true;
+                    break;
+                }
+            }
+        if (!algum && (pedra ? n.pedras_lembradas : n.macieiras_lembradas).empty())
+            return false;
+    }
     const std::vector<int> d = distancias(n.pos);
     auto passos_ate = [&](Pos alvo) {
         int melhor = -1;
@@ -993,7 +1328,6 @@ bool Mundo::procurar_recurso(const Npc& n, bool pedra, int& indice_achado,
         }
         return melhor;
     };
-    const int metade = cfg::VISAO_LADO / 2;
     int melhor_d = -1;
     for (int dy = -metade; dy < metade; ++dy)
         for (int dx = -metade; dx < metade; ++dx) {
@@ -1053,8 +1387,11 @@ bool Mundo::trabalhar(Npc& n) {
             return false;
         }
     }
-    // Construir é na própria célula da obra; o resto, ao lado do alvo.
-    const bool chegou = (n.tarefa == Tarefa::Construir) ? (d == 0) : (d == 1);
+    // Construir é na própria célula da obra; o machado, onde ele estiver;
+    // o resto, ao lado do alvo.
+    if (n.tarefa == Tarefa::Machado) n.tarefa_pos = n.pos;
+    const bool chegou = (n.tarefa == Tarefa::Machado) ? true
+                      : (n.tarefa == Tarefa::Construir) ? (d == 0) : (d == 1);
     if (!chegou) {
         if (n.tarefa == Tarefa::Construir && !livre(n.tarefa_pos) && d != 0) {
             n.estado = EstadoNpc::IndoTrabalhar;  // a obra está ocupada: espera
@@ -1087,15 +1424,6 @@ void Mundo::pausar_trabalho(Npc& n) {
     n.estado = EstadoNpc::Vagando;
 }
 
-void Mundo::fazer_machado(Npc& n) {
-    if (n.machado || n.lascas < cfg::MACHADO_LASCAS || n.galhos < cfg::MACHADO_GALHOS)
-        return;
-    n.lascas -= cfg::MACHADO_LASCAS;
-    n.galhos -= cfg::MACHADO_GALHOS;
-    n.machado = true;  // feito na hora; dura para sempre
-    registrar(TipoRegistro::MachadoFeito, n.id);
-}
-
 void Mundo::evento_fim_trabalho(Npc& n) {
     const Tarefa t = n.tarefa;
     n.tarefa = Tarefa::Nenhuma;
@@ -1116,16 +1444,21 @@ void Mundo::evento_fim_trabalho(Npc& n) {
             ocupar(indice(p.pos), Ocupante::Nada);
             registrar(TipoRegistro::PedraEsgotou, n.id, -1, -1, p.pos);
         }
-        fazer_machado(n);
     } else if (t == Tarefa::Galhos) {
         if (!macieiras_[n.tarefa_alvo].existe) return;
         n.galhos += cfg::GALHOS_POR_VEZ;  // a árvore não se estraga
         lembrar_macieira(n, n.tarefa_alvo);
-        fazer_machado(n);
+    } else if (t == Tarefa::Machado) {
+        n.lascas -= cfg::MACHADO_LASCAS;
+        n.galhos -= cfg::MACHADO_GALHOS;
+        n.machado = true;  // dura para sempre
+        registrar(TipoRegistro::MachadoFeito, n.id);
     } else if (t == Tarefa::Cortar) {
         Macieira& m = macieiras_[n.tarefa_alvo];
         if (!m.existe) return;
         m.existe = false;  // a árvore (viva ou seca) some
+        m.quedas.clear();
+        m.quando_queda = -1.0;
         ocupar(indice(m.pos), Ocupante::Nada);
         n.lenha += cfg::LENHA_POR_ARVORE;
         registrar(TipoRegistro::ArvoreCortada, n.id, -1, -1, m.pos);
@@ -1173,9 +1506,21 @@ void Mundo::registrar(TipoRegistro t, int a, int b, int c, Pos pos) {
     historico_.push_back(r);
 }
 
+// Idade em anos (com fração). Como o ano tem sempre 365 dias, completar
+// N anos é exatamente N × 365 dias depois do nascimento: o aniversário.
 double Mundo::idade_anos(const Npc& n) const {
     const double agora = n.morreu_em >= 0.0 ? n.morreu_em : tempo_;
-    return n.idade_ref_anos + (agora - n.idade_ref_t) / cfg::SEGUNDOS_POR_ANO;
+    return (agora - n.nascimento) / cfg::SEGUNDOS_POR_ANO;
+}
+
+// Idade de ter filhos (anos completos): dos 16 até os 45 (mulher) / 60
+// (homem), inclusive — PROVISÓRIO ("até 45" = enquanto tem 45 anos).
+bool Mundo::pode_ter_filho(const Npc& n) const {
+    if (n.bebe || n.estado == EstadoNpc::Morto) return false;
+    const double anos = std::floor(idade_anos(n) + 1e-9);
+    const double max = (n.sexo == Sexo::Mulher) ? cfg::IDADE_MAX_PROCRIAR_MULHER
+                                                : cfg::IDADE_MAX_PROCRIAR_HOMEM;
+    return anos >= cfg::IDADE_MIN_PROCRIAR && anos <= max;
 }
 
 // Célula livre mais perto de `centro` (camadas em volta; sorteada na camada).
@@ -1201,13 +1546,16 @@ void Mundo::sair_de_morador(Npc& n) {
 
 // Casal: um homem e uma mulher adultos, os dois sem par, que se veem na
 // mesma área (32 x 32), viram casal na hora (decisão do dono).
+// Idade mínima para o casal: 16 anos (a de procriar) — PROVISÓRIO.
 void Mundo::formar_casal(Npc& n) {
     if (n.bebe || n.parceiro >= 0) return;
+    if (idade_anos(n) + 1e-9 < cfg::IDADE_MIN_PROCRIAR) return;
     const int metade = cfg::VISAO_LADO / 2;
     int melhor = -1, melhor_d = 0;
     for (const Npc& o : npcs_) {
         if (o.id == n.id || o.bebe || o.estado == EstadoNpc::Morto) continue;
         if (o.sexo == n.sexo || o.parceiro >= 0) continue;
+        if (idade_anos(o) + 1e-9 < cfg::IDADE_MIN_PROCRIAR) continue;
         const int dx = o.pos.x - n.pos.x, dy = o.pos.y - n.pos.y;
         if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
         const int d = distancia_passos(n.pos, o.pos);
@@ -1250,13 +1598,13 @@ void Mundo::unir_abrigo_casal(Npc& a, Npc& b) {
     }
 }
 
-// Quer procriar agora? Adulto, com par vivo, o casal com o mesmo abrigo,
-// sem precisar comer nem beber, e a mulher podendo engravidar (não está
-// grávida e já passaram 7 dias do último parto).
+// Quer procriar agora? Os dois na idade de ter filhos, o casal com o mesmo
+// abrigo, sem precisar comer nem beber, e a mulher podendo engravidar (não
+// está grávida e já passaram 2 meses do último parto).
 bool Mundo::quer_procriar(const Npc& n) const {
     if (n.bebe || n.parceiro < 0) return false;
     const Npc& p = npcs_[n.parceiro];
-    if (p.estado == EstadoNpc::Morto || p.bebe) return false;
+    if (!pode_ter_filho(n) || !pode_ter_filho(p)) return false;
     if (n.abrigo_casa < 0 || n.abrigo_casa != p.abrigo_casa) return false;
     if (n.dentro_abrigo < 0 &&
         (n.fome < cfg::FOME_LIMITE_COMER || n.sede < cfg::SEDE_LIMITE_BEBER))
@@ -1294,6 +1642,7 @@ void Mundo::ver_se_comeca_procriar(int a) {
         const Npc& h = npcs_[m.parceiro];
         if (h.dentro_abrigo != a) continue;
         if (m.gravida || tempo_ < m.pode_engravidar_em) continue;
+        if (!pode_ter_filho(m) || !pode_ter_filho(h)) continue;
         m.procriando_desde = tempo_;
         agendar(tempo_ + cfg::PROCRIAR_H * cfg::SEGUNDOS_POR_HORA, CONCEPCAO, m.id);
     }
@@ -1307,21 +1656,22 @@ void Mundo::evento_concepcao(int mae) {
     const Npc& h = npcs_[m.parceiro];
     if (m.dentro_abrigo < 0 || h.dentro_abrigo != m.dentro_abrigo) return;
     if (m.gravida || tempo_ < m.pode_engravidar_em) return;
+    if (!pode_ter_filho(m) || !pode_ter_filho(h)) return;
     m.gravida = true;
     m.gravidez_pai = h.id;
-    m.quando_nascer = tempo_ + cfg::GRAVIDEZ_DIAS * cfg::SEGUNDOS_POR_DIA;
+    m.quando_nascer = somar_meses(tempo_, cfg::GRAVIDEZ_MESES);  // 9 meses
     agendar(m.quando_nascer, NASCIMENTO, m.id);
     registrar(TipoRegistro::Gravidez, m.id, h.id);
 }
 
-// 3 dias depois: nasce um bebê ao lado da mãe (sexo meio a meio).
+// 9 meses depois: nasce um bebê ao lado da mãe (sexo meio a meio).
 // Nome: "F." + nome da mãe; do 2º filho em diante, "2F.", "3F."...
 void Mundo::evento_nascimento(int mae) {
     Pos onde;
     if (!lugar_livre_perto(npcs_[mae].pos, onde)) return;  // sem lugar (PROVISÓRIO)
     Npc& m = npcs_[mae];
     m.gravida = false;
-    m.pode_engravidar_em = tempo_ + cfg::INTERVALO_FILHOS_DIAS * cfg::SEGUNDOS_POR_DIA;
+    m.pode_engravidar_em = somar_meses(tempo_, cfg::INTERVALO_FILHOS_MESES);
     m.filhos += 1;
     Npc b;
     b.id = static_cast<int>(npcs_.size());
@@ -1330,9 +1680,7 @@ void Mundo::evento_nascimento(int mae) {
     b.sexo = moeda(rng_) ? Sexo::Mulher : Sexo::Homem;
     b.bebe = true;
     b.estado = EstadoNpc::Bebe;
-    b.nasceu = tempo_;
-    b.idade_ref_anos = 0.0;
-    b.idade_ref_t = tempo_;
+    b.nascimento = tempo_;
     b.mae = m.id;
     b.pai = m.gravidez_pai;
     b.hp = cfg::HP_INICIAL;
@@ -1343,97 +1691,191 @@ void Mundo::evento_nascimento(int mae) {
     m.gravidez_pai = -1;
     ocupar(indice(b.pos), Ocupante::Npc);
     npcs_.push_back(b);  // (depois disso, "m" não vale mais: a lista cresceu)
-    agendar(tempo_ + cfg::BEBE_VIRA_ADULTO_DIAS * cfg::SEGUNDOS_POR_DIA, VIRA_ADULTO, b.id);
+    npcs_.back().quando_adulto = tempo_ + cfg::BEBE_VIRA_ADULTO_ANOS * cfg::SEGUNDOS_POR_ANO;
+    agendar(npcs_.back().quando_adulto, VIRA_ADULTO, b.id);
+    npcs_.back().quando_velhice = tempo_ + cfg::IDADE_MAXIMA_ANOS * cfg::SEGUNDOS_POR_ANO;
+    agendar(npcs_.back().quando_velhice, VELHICE, b.id);
     registrar(TipoRegistro::Nascimento, b.id, mae, pai);
 }
 
-// 10 dias de vida: vira adulto e "salta" para 20 anos. Morre aos 60.
+// 15 anos: vira adulto (a idade continua contando normalmente).
 void Mundo::evento_adulto(int id) {
     Npc& n = npcs_[id];
     if (n.estado == EstadoNpc::Morto || !n.bebe) return;
     n.bebe = false;
     n.estado = EstadoNpc::Vagando;
-    n.idade_ref_anos = cfg::IDADE_AO_VIRAR_ADULTO;
-    n.idade_ref_t = tempo_;
     n.falta_passo = cfg::NPC_PASSO_S;
     n.falta_fome = cfg::FOME_INTERVALO_S;
     n.falta_sede = cfg::SEDE_INTERVALO_S;
-    n.quando_velhice = tempo_ + (cfg::IDADE_MAXIMA_ANOS - cfg::IDADE_AO_VIRAR_ADULTO) *
-                                    cfg::SEGUNDOS_POR_ANO;
-    agendar(n.quando_velhice, VELHICE, id);
     registrar(TipoRegistro::VirouAdulto, id);
 }
 
-// 60 anos: morre de velhice.
+// 100 anos: morre de velhice.
 void Mundo::evento_velhice(int id) {
     Npc& n = npcs_[id];
     if (n.estado == EstadoNpc::Morto) return;
     morrer(n, 8);
 }
 
-// Uma maçã cai em volta da macieira: na primeira camada que tiver célula
-// de grama livre (camada 1 = as 8 vizinhas; se lotada, camada 2; e assim
-// por diante). Dentro da camada, a célula é sorteada.
+// Uma maçã cai em volta da macieira: na primeira camada que tiver lugar
+// (célula vazia ou pilha com menos de 32), sorteada dentro da camada.
 void Mundo::evento_queda_maca(int indice_macieira) {
-    const Macieira& m = macieiras_[indice_macieira];
-    std::vector<Pos> opcoes;
-    for (int r = 1; camada_livres(m.pos, r, opcoes); ++r) {
-        if (!opcoes.empty()) {
-            std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-            por_maca_no_chao(indice(opcoes[d(rng_)]), indice_macieira);
-            return;
-        }
-    }
+    const int i = lugar_para_maca(macieiras_[indice_macieira].pos);
+    if (i >= 0) por_maca_no_chao(i, indice_macieira);
 }
 
 // ===========================================================================
 // Ajudantes
 // ===========================================================================
 
-// Converte os segundos da simulação em dia, hora e minuto do jogo.
-Mundo::Relogio Mundo::relogio() const {
-    const double total = tempo_ + cfg::HORA_INICIAL * cfg::SEGUNDOS_POR_HORA;
-    const long long minutos =
-        static_cast<long long>(total / (cfg::SEGUNDOS_POR_HORA / 60.0) + 1e-9);
-    const long long minutos_por_dia = 60LL * cfg::HORAS_POR_DIA;
-    Relogio r;
-    r.dia = static_cast<int>(minutos / minutos_por_dia) + 1;
-    r.hora = static_cast<int>((minutos % minutos_por_dia) / 60);
-    r.minuto = static_cast<int>(minutos % 60);
-    return r;
+// --- Calendário -----------------------------------------------------------
+// O tempo da simulação (tempo_) é contado em segundos desde 01/01/0001 às
+// 07:00. Somando as 7 h, vira "segundos desde 01/01/0001 às 00:00"; daí
+// sai o dia (÷ 86 400), o ano (÷ 365 dias) e o mês (pela tabela de dias).
+
+Data Mundo::data_de(double t) {
+    const double desde_zero = t + cfg::HORA_INICIAL * cfg::SEGUNDOS_POR_HORA;
+    const long long seg = static_cast<long long>(std::floor(desde_zero + 1e-6));
+    const long long por_dia = static_cast<long long>(cfg::SEGUNDOS_POR_DIA);
+    long long dias = seg / por_dia, resto = seg % por_dia;
+    if (resto < 0) { resto += por_dia; dias -= 1; }  // antes do começo
+    long long ano0 = dias / cfg::DIAS_POR_ANO, dia_ano = dias % cfg::DIAS_POR_ANO;
+    if (dia_ano < 0) { dia_ano += cfg::DIAS_POR_ANO; ano0 -= 1; }
+    Data d;
+    d.ano = static_cast<int>(ano0) + cfg::ANO_INICIAL;
+    int mes = 0;
+    while (dia_ano >= cfg::DIAS_DO_MES[mes]) dia_ano -= cfg::DIAS_DO_MES[mes++];
+    d.mes = mes + 1;
+    d.dia = static_cast<int>(dia_ano) + 1;
+    d.hora = static_cast<int>(resto / 3600);
+    d.minuto = static_cast<int>((resto % 3600) / 60);
+    d.segundo = static_cast<int>(resto % 60);
+    return d;
+}
+
+double Mundo::tempo_de(int ano, int mes, int dia) {
+    const double dias = static_cast<double>(ano - cfg::ANO_INICIAL) * cfg::DIAS_POR_ANO +
+                        dia_do_ano(mes, dia);
+    return dias * cfg::SEGUNDOS_POR_DIA - cfg::HORA_INICIAL * cfg::SEGUNDOS_POR_HORA;
+}
+
+double Mundo::somar_meses(double t, int meses) {
+    const Data d = data_de(t);
+    const double hora = t - tempo_de(d.ano, d.mes, d.dia);  // segundos no dia
+    int m0 = d.mes - 1 + meses;
+    int ano = d.ano + m0 / 12;
+    m0 %= 12;
+    if (m0 < 0) { m0 += 12; ano -= 1; }
+    const int dia = std::min(d.dia, cfg::DIAS_DO_MES[m0]);
+    return tempo_de(ano, m0 + 1, dia) + hora;
+}
+
+Estacao Mundo::estacao_de(double t) {
+    const int m = data_de(t).mes;
+    if (m == 12 || m <= 2) return Estacao::Verao;
+    if (m <= 5) return Estacao::Outono;
+    if (m <= 8) return Estacao::Inverno;
+    return Estacao::Primavera;
+}
+
+void Mundo::limites_estacao(double t, double& inicio, double& fim) {
+    const Data d = data_de(t);
+    const int e = static_cast<int>(estacao_de(t));
+    const int mes_ini = MES_DA_ESTACAO[e];
+    // O verão começa em dezembro do ano anterior quando estamos em jan/fev.
+    const int ano_ini = (mes_ini > d.mes) ? d.ano - 1 : d.ano;
+    inicio = tempo_de(ano_ini, mes_ini, 1);
+    const int mes_fim = MES_DA_ESTACAO[(e + 1) % 4];
+    const int ano_fim = (mes_fim < mes_ini) ? ano_ini + 1 : ano_ini;
+    fim = tempo_de(ano_fim, mes_fim, 1);
 }
 
 // --- Dia, noite, temperatura, HP -------------------------------------------
 
+// Horas de sol no dia de t (calculado ao meio-dia desse dia, para o nascer e
+// o pôr do sol serem os mesmos o dia inteiro). Primavera e outono: 12 h.
+// Verão: sobe em curva até 13 h 30 no meio da estação e volta; inverno:
+// desce até 11 h no meio e volta.
+double Mundo::horas_de_sol(double t) {
+    const Data d = data_de(t);
+    const double meio_dia = tempo_de(d.ano, d.mes, d.dia) + 12.0 * cfg::SEGUNDOS_POR_HORA;
+    double ini = 0.0, fim = 0.0;
+    limites_estacao(meio_dia, ini, fim);
+    const double f = (meio_dia - ini) / (fim - ini);
+    switch (estacao_de(meio_dia)) {
+        case Estacao::Verao:
+            return cfg::DIA_PADRAO_H + (cfg::DIA_MAX_VERAO_H - cfg::DIA_PADRAO_H) * curva_pico(f);
+        case Estacao::Inverno:
+            return cfg::DIA_PADRAO_H + (cfg::DIA_MIN_INVERNO_H - cfg::DIA_PADRAO_H) * curva_pico(f);
+        default:
+            return cfg::DIA_PADRAO_H;
+    }
+}
+
+// Mínima e máxima da temperatura em t. Os valores do dono valem no MEIO de
+// cada estação; entre o meio de uma e o meio da seguinte, mudam aos poucos
+// (curva suave).
+void Mundo::min_max_temperatura(double t, double& minima, double& maxima) {
+    static constexpr double MIN[4] = {cfg::VERAO_MIN, cfg::OUTONO_MIN,
+                                      cfg::INVERNO_MIN, cfg::PRIMAVERA_MIN};
+    static constexpr double MAX[4] = {cfg::VERAO_MAX, cfg::OUTONO_MAX,
+                                      cfg::INVERNO_MAX, cfg::PRIMAVERA_MAX};
+    double ini = 0.0, fim = 0.0;
+    limites_estacao(t, ini, fim);
+    const int e = static_cast<int>(estacao_de(t));
+    const double meio = (ini + fim) / 2.0;
+    int a, b;            // estações de cada ponta do trecho
+    double ta, tb;       // o meio de cada uma
+    if (t >= meio) {     // do meio desta até o meio da próxima
+        double i2 = 0.0, f2 = 0.0;
+        limites_estacao(fim + 1.0, i2, f2);
+        a = e; b = (e + 1) % 4; ta = meio; tb = (i2 + f2) / 2.0;
+    } else {             // do meio da anterior até o meio desta
+        double i0 = 0.0, f0 = 0.0;
+        limites_estacao(ini - 1.0, i0, f0);
+        a = (e + 3) % 4; b = e; ta = (i0 + f0) / 2.0; tb = meio;
+    }
+    const double w = curva_passagem((t - ta) / (tb - ta));
+    minima = MIN[a] + (MIN[b] - MIN[a]) * w;
+    maxima = MAX[a] + (MAX[b] - MAX[a]) * w;
+}
+
 // Hora do dia (0 a 24, com fração) no tempo t da simulação.
 double Mundo::hora_do_dia(double t) const {
     const double total_h = t / cfg::SEGUNDOS_POR_HORA + cfg::HORA_INICIAL;
-    return std::fmod(total_h, static_cast<double>(cfg::HORAS_POR_DIA));
+    double h = std::fmod(total_h, static_cast<double>(cfg::HORAS_POR_DIA));
+    if (h < 0) h += cfg::HORAS_POR_DIA;
+    return h;
 }
 
+// "Dia" do abrigo: 06:00–18:00 (regra antiga, o dono vai mudar depois).
 bool Mundo::e_dia() const {
     const double h = hora_do_dia(tempo_);
     return h >= cfg::DIA_COMECA_H && h < cfg::NOITE_COMECA_H;
 }
 
-// Temperatura em linha reta entre os pontos do config.hpp (dando a volta
-// na meia-noite: depois do último ponto vem o primeiro do dia seguinte).
+bool Mundo::sol() const {
+    const double h = hora_do_dia(tempo_);
+    return h >= nascer_do_sol(tempo_) && h < por_do_sol(tempo_);
+}
+
+// Temperatura em t: entre a mínima e a máxima do dia, com a forma do dia
+// presa ao nascer e ao pôr do sol (ver config.hpp), em linha reta entre:
+//   mínima (nascer − 2 h) -> máxima (nascer + 8 h) -> máxima (pôr do sol)
+//   -> mínima (pôr + 4 h) -> mínima até a manhã seguinte.
 double Mundo::temperatura_em(double t) const {
+    double tmin = 0.0, tmax = 0.0;
+    min_max_temperatura(t, tmin, tmax);
     const double h = hora_do_dia(t);
-    for (int k = 0; k < cfg::TEMP_PONTOS; ++k) {
-        const int prox = (k + 1) % cfg::TEMP_PONTOS;
-        double h0 = cfg::TEMP_HORAS[k], h1 = cfg::TEMP_HORAS[prox];
-        double hh = h;
-        if (h1 <= h0) {  // trecho que passa da meia-noite
-            h1 += cfg::HORAS_POR_DIA;
-            if (hh < h0) hh += cfg::HORAS_POR_DIA;
-        }
-        if (hh >= h0 && hh < h1) {
-            const double f = (hh - h0) / (h1 - h0);
-            return cfg::TEMP_GRAUS[k] + f * (cfg::TEMP_GRAUS[prox] - cfg::TEMP_GRAUS[k]);
-        }
-    }
-    return cfg::TEMP_GRAUS[0];
+    const double nasce = nascer_do_sol(t), poe = por_do_sol(t);
+    const double a = nasce - cfg::TEMP_MIN_ANTES_NASCER_H;
+    const double b = nasce + cfg::TEMP_MAX_DEPOIS_NASCER_H;
+    const double c = poe;
+    const double d = poe + cfg::TEMP_MIN_DEPOIS_POR_H;
+    if (h < a || h >= d) return tmin;
+    if (h < b) return tmin + (tmax - tmin) * (h - a) / (b - a);
+    if (h < c) return tmax;
+    return tmax + (tmin - tmax) * (h - c) / (d - c);
 }
 
 // Próximo momento em que a temperatura cruza 4° ou 5°, ou que dá 06:00.
@@ -1441,7 +1883,7 @@ double Mundo::temperatura_em(double t) const {
 // retas, então isso acha o cruzamento com folga de precisão).
 double Mundo::proximo_marco_temperatura() const {
     if (marco_temp_ > tempo_ + 1e-9) return marco_temp_;  // ainda vale
-    const double passo = cfg::SEGUNDOS_POR_HORA / 60.0;  // 1 minuto do jogo
+    const double passo = cfg::SEGUNDOS_POR_MINUTO;  // 1 minuto do jogo
     auto lado = [&](double t, double limite) { return temperatura_em(t) < limite; };
     // 06:00 (quando o NPC sai do abrigo)
     double h = hora_do_dia(tempo_);
@@ -1466,18 +1908,19 @@ double Mundo::proximo_marco_temperatura() const {
     return melhor;
 }
 
-// HP: −5/s por necessidade no crítico (fome 0, sede 0, frio < 4°).
+// HP: −5 por minuto por necessidade no crítico (fome 0, sede 0, frio < 4°).
 double Mundo::taxa_hp(const Npc& n) const {
     if (n.bebe) return 0.0;  // bebê: sem necessidades (por enquanto)
     // Dentro do abrigo: nada é crítico (nem frio, nem fome, nem sede) e o
-    // HP se recupera 1 por segundo, até 100.
+    // HP se recupera 1 por minuto, até 100.
     if (n.dentro_abrigo >= 0)
-        return n.hp < cfg::HP_MAXIMO ? cfg::HP_RECUPERA_ABRIGO_S : 0.0;
+        return n.hp < cfg::HP_MAXIMO ? cfg::HP_RECUPERA_ABRIGO_MIN / cfg::SEGUNDOS_POR_MINUTO
+                                     : 0.0;
     int criticos = 0;
     if (n.fome <= cfg::FOME_MINIMA) ++criticos;
     if (n.sede <= cfg::SEDE_MINIMA) ++criticos;
     if (temperatura() < cfg::TEMP_CRITICA) ++criticos;
-    return -cfg::HP_DANO_POR_CRITICO_S * criticos;
+    return -cfg::HP_DANO_POR_CRITICO_MIN / cfg::SEGUNDOS_POR_MINUTO * criticos;
 }
 
 double Mundo::ate_critico_fome(const Npc& n) const {
@@ -1488,43 +1931,34 @@ double Mundo::ate_critico_sede(const Npc& n) const {
     return n.sede / (cfg::SEDE_QUEDA / cfg::SEDE_INTERVALO_S);
 }
 
-int Mundo::largura() const { return cfg::LARGURA; }
-int Mundo::altura() const { return cfg::ALTURA; }
-
-bool Mundo::dentro(Pos p) const {
-    return p.x >= 0 && p.y >= 0 && p.x < largura() && p.y < altura();
-}
 
 Ocupante Mundo::ocupante(int x, int y) const { return ocupacao_[indice({x, y})]; }
 
-Pos Mundo::com_z(Pos p) const {
-    if (dentro(p)) p.z = mapa_.superficie(p.x, p.y);
-    return p;
-}
 
-// Livre = dentro do mapa, terra firme (não é água) e sem nada em cima.
+// Livre = dentro do mapa, terra firme (não é água nem gelo) e sem nada em
+// cima. É onde as coisas podem ser postas (maçã, bebê, corpo, abrigo).
 bool Mundo::livre(Pos p) const {
     if (!dentro(p)) return false;
     return mapa_.e_terra(p.x, p.y) && ocupacao_[indice(p)] == Ocupante::Nada;
 }
 
-// Passar de uma coluna para a vizinha: precisa estar livre e o degrau
-// (diferença de altura) ser de no máximo 1 nível.
+// Para ANDAR também vale o gelo (pedido do dono do projeto).
+bool Mundo::pisavel(Pos p) const {
+    if (!dentro(p)) return false;
+    return (mapa_.e_terra(p.x, p.y) || mapa_.e_gelo(p.x, p.y)) &&
+           ocupacao_[indice(p)] == Ocupante::Nada;
+}
+
+// Passar de uma coluna para a vizinha: precisa estar livre (terra ou gelo)
+// e o degrau (diferença de altura) ser de no máximo 1 nível.
 bool Mundo::pode_pisar(Pos de, Pos para) const {
-    if (!livre(para)) return false;
+    if (!pisavel(para)) return false;
     const int degrau = std::abs(mapa_.superficie(para.x, para.y) - de.z);
     return degrau <= cfg::NPC_DEGRAU_MAX;
 }
 
-// A maçã já está sendo comida por outro NPC?
-bool Mundo::maca_reservada(Pos p, int por_quem_nao) const {
-    auto it = reservas_.find(indice(p));
-    return it != reservas_.end() && it->second != por_quem_nao;
-}
-
-// Procura a maçã mais próxima dentro da área de visão (32 x 32 em volta do
-// NPC: 16 células para um lado e 15 para o outro, somando 32 com a dele).
-// Maçãs que outro NPC já está comendo não contam.
+// Procura a pilha de maçãs mais próxima dentro da área de visão (32 x 32 em
+// volta do NPC: 16 células para um lado e 15 para o outro).
 bool Mundo::procurar_maca(const Npc& n, Pos& achada) const {
     const int metade = cfg::VISAO_LADO / 2;
     bool achou = false;
@@ -1533,7 +1967,6 @@ bool Mundo::procurar_maca(const Npc& n, Pos& achada) const {
         for (int dx = -metade; dx < metade; ++dx) {
             Pos p{n.pos.x + dx, n.pos.y + dy};
             if (!dentro(p) || ocupacao_[indice(p)] != Ocupante::Maca) continue;
-            if (maca_reservada(p, n.id)) continue;
             const int ps = distancia_passos(n.pos, p), d2 = distancia2(n.pos, p);
             if (!achou || ps < melhor_passos ||
                 (ps == melhor_passos && d2 < melhor_d2)) {
@@ -1586,7 +2019,7 @@ bool Mundo::procurar_agua(const Npc& n, Pos& achada) const {
 }
 
 // Move para a coluna vizinha. Se mudou de nível (subiu ou desceu 1), o
-// próximo passo só vem depois de 5 s em vez de 1 s.
+// próximo passo só vem depois de 10 s em vez de 5 s.
 void Mundo::mover(Npc& n, Pos destino) {
     destino = com_z(destino);
     ocupar(indice(n.pos), Ocupante::Nada);
@@ -1606,13 +2039,10 @@ void Mundo::mover(Npc& n, Pos destino) {
 // - O par fica livre para formar outro casal; a vaga de morador abre.
 // - Morreu dentro do abrigo: o corpo fica numa célula livre ao lado.
 void Mundo::morrer(Npc& n, int causa_extra) {
-    if (n.estado == EstadoNpc::Comendo && !n.comendo_da_mao) {
-        const int i = indice(n.alvo);
-        reservas_.erase(i);
-        // Se o prazo de virar muda já passou enquanto ele comia, vira agora.
-        auto it = quando_muda_.find(i);
-        if (it != quando_muda_.end() && it->second <= tempo_ + EPS)
-            evento_maca_vira_muda(i);
+    // A maçã que ele estava comendo cai junto com as que carregava.
+    if (n.comendo) {
+        n.comendo = false;
+        n.macas_carregadas += 1;
     }
     n.causa_morte = causa_extra;
     n.morreu_em = tempo_;
@@ -1623,7 +2053,6 @@ void Mundo::morrer(Npc& n, int causa_extra) {
     }
     n.estado = EstadoNpc::Morto;
     n.tem_alvo = false;
-    n.comendo_da_mao = false;
     if (n.gravida) {
         n.gravida = false;
         registrar(TipoRegistro::BebePerdido, n.id);
@@ -1645,24 +2074,19 @@ void Mundo::morrer(Npc& n, int causa_extra) {
         if (tem_corpo) n.pos = com_z(fora);
     }
     if (tem_corpo) ocupar(indice(n.pos), Ocupante::Corpo);
-    while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, n.origem_carregada))
+    while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, -1))
         n.macas_carregadas -= 1;
-    n.origem_carregada = -1;
+    n.macas_carregadas = 0;
     registrar(TipoRegistro::Morte, n.id, n.causa_morte);
 }
 
-// Põe uma maçã no chão na célula livre mais perto de `onde` (camada 1 =
-// as 8 vizinhas; se lotada, a próxima camada), sorteada dentro da camada.
+// Põe uma maçã no chão perto de `onde` (célula vazia ou pilha com lugar,
+// na camada mais perto), sorteada dentro da camada.
 bool Mundo::soltar_maca_perto(Pos onde, int origem) {
-    std::vector<Pos> opcoes;
-    for (int r = 1; camada_livres(onde, r, opcoes); ++r) {
-        if (!opcoes.empty()) {
-            std::uniform_int_distribution<size_t> d(0, opcoes.size() - 1);
-            por_maca_no_chao(indice(opcoes[d(rng_)]), origem);
-            return true;
-        }
-    }
-    return false;
+    const int i = lugar_para_maca(onde);
+    if (i < 0) return false;
+    por_maca_no_chao(i, origem);
+    return true;
 }
 
 std::vector<Pos> Mundo::macas() const {
@@ -1718,10 +2142,85 @@ bool Mundo::teste_mover(int id, int x, int y) {
 // Só para testes: muda a idade (anos) e reagenda a velhice a partir dela.
 void Mundo::teste_idade(int id, double anos) {
     Npc& n = npcs_[id];
-    n.idade_ref_anos = anos;
-    n.idade_ref_t = tempo_;
-    n.quando_velhice = tempo_ + (cfg::IDADE_MAXIMA_ANOS - anos) * cfg::SEGUNDOS_POR_ANO;
+    n.nascimento = tempo_ - anos * cfg::SEGUNDOS_POR_ANO;
+    n.quando_velhice = n.nascimento + cfg::IDADE_MAXIMA_ANOS * cfg::SEGUNDOS_POR_ANO;
     agendar(n.quando_velhice, VELHICE, id);
+    if (n.bebe) {
+        n.quando_adulto = n.nascimento + cfg::BEBE_VIRA_ADULTO_ANOS * cfg::SEGUNDOS_POR_ANO;
+        agendar(n.quando_adulto, VIRA_ADULTO, id);
+    }
+}
+
+void Mundo::teste_macas(int id, int quantas) { npcs_[id].macas_carregadas = quantas; }
+
+int Mundo::teste_abrigo(int id, int x, int y, int macas) {
+    Pos p{x, y};
+    if (!livre(p)) return -1;
+    Abrigo ab;
+    ab.pos = com_z(p);
+    ab.macas = macas;
+    const int a = static_cast<int>(abrigos_.size());
+    abrigos_.push_back(ab);
+    ocupar(indice(p), Ocupante::Abrigo);
+    Npc& n = npcs_[id];
+    sair_de_morador(n);
+    abrigos_[a].moradores.push_back(id);
+    n.abrigo_casa = a;
+    return a;
+}
+
+void Mundo::teste_idade_macieira(int k, double anos) {
+    Macieira& m = macieiras_[k];
+    m.nasceu = tempo_ - anos * cfg::SEGUNDOS_POR_ANO;
+    m.quando_secar = m.nasceu + cfg::MACIEIRA_VIDA_ANOS * cfg::SEGUNDOS_POR_ANO;
+    agendar(m.quando_secar, MACIEIRA_SECA, k);
+}
+
+void Mundo::teste_adiantar_parto(int mae, double segundos) {
+    Npc& m = npcs_[mae];
+    if (!m.gravida) return;
+    m.quando_nascer = tempo_ + segundos;
+    agendar(m.quando_nascer, NASCIMENTO, mae);
+}
+
+void Mundo::teste_saltar(double t) {
+    // Tira da fila o que é do calendário (quedas, maçãs, estações).
+    std::vector<Evento> manter;
+    while (!fila_.empty()) {
+        const Evento e = fila_.top();
+        fila_.pop();
+        if (e.tipo != QUEDA_MACA && e.tipo != MACA_VENCE && e.tipo != ESTACAO)
+            manter.push_back(e);
+    }
+    for (const Evento& e : manter) fila_.push(e);
+    for (size_t i = 0; i < pilha_.size(); ++i)
+        if (!pilha_[i].empty()) {
+            pilha_[i].clear();
+            ocupar(static_cast<int>(i), Ocupante::Nada);
+        }
+    macas_chao_.clear();
+    for (Macieira& m : macieiras_) {
+        m.quedas.clear();
+        m.quando_queda = -1.0;
+        m.proxima_queda = 0;
+    }
+    tempo_ = t;
+    marco_temp_ = -1.0;
+    critico_valido_ate_ = -1.0;
+    // A estação da data nova.
+    const auto gelo = mapa_.degelar();
+    if (!gelo.empty()) { tirar_de_cima_do_gelo(gelo); contar_livres(); }
+    double ini = 0.0, fim = 0.0;
+    limites_estacao(tempo_, ini, fim);
+    const Estacao agora = estacao_de(tempo_);
+    if (agora == Estacao::Verao) comecar_verao(ini, fim);
+    if (agora == Estacao::Inverno) congelar_vales();
+    for (int e = 0; e < 4; ++e) {
+        const Data d = data_de(tempo_);
+        double quando = tempo_de(d.ano, MES_DA_ESTACAO[e], 1);
+        if (quando <= tempo_) quando = tempo_de(d.ano + 1, MES_DA_ESTACAO[e], 1);
+        agendar(quando, ESTACAO, e);
+    }
 }
 
 void Mundo::teste_definir(int x, int y, int z, Material m, int nivel_agua) {

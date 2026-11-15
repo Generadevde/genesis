@@ -33,6 +33,7 @@ enum class Material : std::uint8_t {
     Agua = 4,
     Neve = 5,   // topo dos morros mais altos (+4)
     Areia = 6,  // chão do nível 0 encostado no mar
+    Gelo = 7,   // água de vale congelada (inverno): anda por cima, não bebe
 };
 
 class Mapa3D {
@@ -53,8 +54,16 @@ public:
 
     // Superfície da coluna (ver explicação no topo).
     int superficie(int x, int y) const { return sup_[y * largura() + x]; }
-    // A coluna é terra firme (o topo é sólido, não água)?
+    // A coluna é terra firme (o topo é sólido, não água nem gelo)?
     bool e_terra(int x, int y) const;
+    // O topo da coluna é gelo?
+    bool e_gelo(int x, int y) const;
+    // Gelo (pedido em 15/11/2026): a camada de cima da água das colunas
+    // dentro do retângulo [x0, x1) x [y0, y1) congela. O nível da água fica
+    // guardado no gelo; ao derreter, volta a ser a mesma água. Devolve as
+    // colunas que congelaram / derreteram.
+    std::vector<int> congelar(int x0, int y0, int x1, int y1);
+    std::vector<int> degelar();
     void recalcular_superficie(int x, int y);
     void recalcular_superficies();
 

@@ -1,5 +1,7 @@
 # HP, urgência, dia/noite e temperatura (motor 0.8)
 
+> **Mudou em 15/11/2026 (motor 0.12):** dano **−5 HP por minuto** por necessidade crítica, recuperação **+1 por minuto** no abrigo; a temperatura agora depende da **estação** e a forma do dia fica presa ao nascer/pôr do sol; o dia (sol) varia de 11 h a 13 h 30. Ver [TEMPO.md](TEMPO.md).
+
 Pedido pelo dono do projeto em 14/11/2026.
 
 ## Regras

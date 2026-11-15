@@ -1,5 +1,7 @@
 # Família: sexos, casais, filhos, idade e histórico (motor 0.11)
 
+> **Mudou em 15/11/2026 (motor 0.12):** idades pelo calendário (ano de 365 dias): velhice aos **100 anos**; ter filhos dos **16 aos 45 (mulher) / 60 (homem)**; gravidez **9 meses**; **2 meses** entre filhos; bebê vira adulto aos **15 anos** (sem pular para 20). O painel mostra a **data de nascimento**. Os tempos antigos abaixo (3 dias, 7 dias, 10 dias, 60 anos, 1 ano = 14 dias) **não valem mais** — ver [TEMPO.md](TEMPO.md).
+
 Pedido pelo dono do projeto em 14/11/2026. Todas as perguntas foram
 respondidas por ele antes do código.
 

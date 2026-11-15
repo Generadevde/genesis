@@ -1,5 +1,7 @@
 # Gerador de mundos e mundo em 3D (motor 0.4)
 
+> **Novo em 15/11/2026 (motor 0.12): gelo.** No inverno a camada de cima da água dos vales vira **gelo** (`g` azul-claro; material `Gelo`): o nível da água fica guardado nele, dá para andar por cima e não dá para beber; derrete na primavera. A água agora se move a cada **5 s**. Ver [TEMPO.md](TEMPO.md).
+
 Pedido pelo dono do projeto em 14/11/2026: a base sólida do gerador de
 mundos, com as 3 dimensões **x, y, z**. Tamanho continua 128 × 128.
 

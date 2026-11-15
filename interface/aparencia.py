@@ -36,6 +36,9 @@ COR_NEVE = BRANCO              # neve "n" branca (pedido do dono do projeto)
 COR_AREIA = (255, 255, 0)      # areia "a" amarelo claro (amarelo claro da paleta de 16 cores)
 COR_PEDRA_ENTIDADE = CINZA_ESCURO  # pedra "⬟" cinza escuro (pedido do dono do projeto)
 COR_MUDA = (0, 255, 0)         # muda "♣" verde-claro (verde claro da paleta de 16 cores)
+COR_GELO = (128, 200, 255)     # gelo "g" azul-claro — PROVISÓRIO (o tom exato)
+COR_PILHA = BRANCO             # o "xN" das pilhas de maçã — PROVISÓRIO
+FRACAO_FONTE_PILHA = 0.42      # tamanho do "xN" em relação à célula — PROVISÓRIO
 
 # ---------------------------------------------------------------------------
 # Fontes do sistema (vêm com o Linux Mint)
@@ -65,3 +68,8 @@ LARGURA_CAMPO_NUMERO = 120 # PROVISÓRIO: largura dos campos de número da janel
 # Segurar uma seta: espera antes de repetir e intervalo entre repetições (ms).
 REPETIR_TECLA_ESPERA_MS = 300     # PROVISÓRIO
 REPETIR_TECLA_INTERVALO_MS = 50   # PROVISÓRIO
+
+# Velocidade: quanto tempo (em ms) cada quadro pode gastar fazendo o motor
+# andar. Se o motor não conseguir andar tudo nesse tempo, o tempo do jogo
+# anda menos (e a barra de baixo mostra a velocidade de verdade).
+ORCAMENTO_MOTOR_MS = 12     # PROVISÓRIO
