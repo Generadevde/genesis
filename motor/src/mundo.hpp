@@ -37,6 +37,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <queue>
@@ -64,7 +65,11 @@ enum class Ocupante : std::uint8_t {
     Muda,          // maçã esquecida 6 h (40%); vira macieira em 3 anos
     MacieiraSeca,  // macieira com 40 anos: cinza, sem maçãs, some em 1 ano
     Pedra,         // ⬟ dá lascas (10 no total), some quando esgota
-    Abrigo         // 🏠 cabe 2 NPCs e 300 maçãs; dentro não faz frio, fome nem sede
+    Abrigo,        // 🏠 cabe 2 NPCs e 80 kg; dentro não faz frio, fome nem sede
+    Animal,        // um animal vivo (galinha, galo, pintinho)
+    Ovo,           // pilha de ovos (o ninho, ou ovos soltos)
+    Carne,         // animal morto por NPC: dá para comer / carregar
+    CorpoAnimal    // animal que morreu sozinho: some em 3 dias
 };
 
 // O que o NPC está fazendo agora.
@@ -83,10 +88,109 @@ enum class EstadoNpc : std::uint8_t {
     IndoProcriar,  // indo para o abrigo do casal, para procriar
     Procriando,    // dentro do abrigo do casal (esperando o parceiro ou junto)
     Bebe,          // bebê: fica parado, sem necessidades (por enquanto)
-    IndoGuardar    // levando as maçãs que pegou para o abrigo dele
+    IndoGuardar,   // levando o que pegou para o abrigo dele
+    Cacando,       // com fome e sem outra comida: indo atrás de um animal
+    Lutando        // atacando um animal (ou se defendendo dele)
 };
 
 enum class Sexo : std::uint8_t { Homem = 0, Mulher = 1 };
+
+// O que o NPC (ou o abrigo) guarda. Medido em PESO (ver config.hpp).
+// Tipos de carne: 0 = pintinho, 1 = galinha, 2 = galo.
+struct Inventario {
+    int macas = 0;
+    int ovos = 0;
+    int carne[3] = {0, 0, 0};
+    double peso() const;
+    bool vazio() const { return macas + ovos + carne[0] + carne[1] + carne[2] == 0; }
+};
+
+// --- Fauna -----------------------------------------------------------------
+enum class Especie : std::uint8_t { Galinha = 0 };
+
+enum class EstadoAnimal : std::uint8_t {
+    Vagando = 0,  // explorando (ou parado perto de quem segue)
+    IndoComer,    // indo para a grama
+    Comendo,      // ciscando (10 s)
+    IndoBeber,
+    Bebendo,      // bicando a água (5 s)
+    Dormindo,     // 19:00 – 05:00, onde estiver
+    Seguindo,     // indo atrás do galo (bando) ou da mãe (pintinho)
+    Namorando,    // galo e galinha juntos (15 min)
+    IndoNinho,    // indo pôr o ovo
+    NoNinho,      // pondo o ovo / ficando 1 h no ninho
+    Chocando,     // 21 dias em cima dos ovos
+    Fugindo,
+    Lutando,      // revidando um NPC (até um dos dois morrer)
+    Morto
+};
+
+struct Animal {
+    int id = 0;
+    Especie especie = Especie::Galinha;
+    Sexo sexo = Sexo::Mulher;     // galinha / galo
+    double nascimento = 0.0;
+    // Fase: 0 = filhote com a mãe (sem fome/sede), 1 = filhote sozinho,
+    // 2 = adulto.
+    int fase = 2;
+    Pos pos;
+    EstadoAnimal estado = EstadoAnimal::Vagando;
+    double hp = 0.0, fome = 100.0, sede = 100.0;
+    // Horas marcadas na fila (valem só se forem iguais às daqui).
+    double quando_passo = -1.0;   // próximo passo / decisão
+    double quando_nec = -1.0;     // próxima queda de fome e sede
+    double quando_sem_hp = -1.0;  // quando o HP chega a 0 (se está caindo)
+    double hp_t = 0.0;            // HP vale `hp` neste instante
+    double taxa_hp = 0.0;         // por segundo
+    Pos destino;
+    bool tem_destino = false;
+    Pos alvo;                     // grama, água, galo, mãe, ninho...
+    std::vector<Pos> aguas;       // memória: onde bebeu
+    std::vector<Pos> caminho;     // caminho guardado até um lugar lembrado (de trás p/ frente)
+    // Bando e família
+    int mae = -1;
+    int bando = -1;               // id do galo do bando (o galo: o próprio id)
+    int dist_bando = 4;           // distância sorteada (3 a 5)
+    // Reprodução (galinha)
+    int namoro_com = -1;
+    double namoro_fim = -1.0;
+    bool fertil = false;          // namorou: põe a ninhada inteira
+    int ovos_ninhada = 0;         // quantos vai pôr (12 a 14)
+    int ovos_postos = 0;
+    int ninho = -1;               // célula do ninho (-1 = ainda não tem)
+    double proxima_postura = -1.0;
+    double sai_ninho = -1.0;
+    double eclosao = -1.0;        // chocando: quando nascem os pintinhos
+    double falha = 0.0;           // chance de cada ovo não prestar (5–20%)
+    double pode_por_em = 0.0;     // 60 dias depois dos pintinhos nascerem
+    // Perigo
+    double arisco_ate = -1.0;
+    int dist_fuga = 10;           // sorteada (8 a 15)
+    int lutando_com = -1;         // NPC
+    int fugindo_de = -1;          // NPC
+    // Morte
+    double morreu_em = -1.0;
+    int causa_morte = 0;          // 1 fome, 2 sede, 8 velhice, 16 morto por NPC
+    int corpo = -1;               // célula do corpo (some em 3 dias)
+};
+
+// Uma pilha de ovos numa célula. Todos os ovos da pilha estão juntos: se
+// ficam mais de 1 dia sem contato (a galinha no ninho, ou o NPC), estragam.
+struct PilhaOvos {
+    int ovos = 0;
+    int ninho_de = -1;       // galinha dona (se é um ninho)
+    bool com_galinha = false;
+    double contato = 0.0;    // último contato (vale se não está com a galinha)
+    double estraga_em = -1;  // contato + 1 dia (a hora marcada na fila)
+};
+
+// Carne no chão (animal morto por NPC).
+struct Carcaca {
+    int celula = 0;
+    int tipo = 1;            // 0 pintinho, 1 galinha, 2 galo
+    double estraga = 0.0;    // quando estraga e some (2 dias)
+};
+
 
 // Histórico do mundo: só os acontecimentos importantes.
 enum class TipoRegistro : std::uint8_t {
@@ -107,7 +211,8 @@ enum class TipoRegistro : std::uint8_t {
     BebePerdido,    // a = mãe (morreu grávida)
     Estacao,        // a = estação que começou (0 verão, 1 outono, 2 inverno, 3 primavera)
     Congelou,       // a = quantas colunas de água viraram gelo
-    Derreteu        // a = quantas colunas de gelo viraram água
+    Derreteu,       // a = quantas colunas de gelo viraram água
+    AnimalMorto     // a = NPC que matou, b = sexo do animal, c = fase, pos
 };
 
 // Estações (na ordem do ano começando pelo verão, que começa em dezembro).
@@ -140,7 +245,7 @@ struct Abrigo {
     Pos pos;
     std::vector<int> moradores;  // NPCs que têm este como abrigo (até 2)
     std::vector<int> dentro;     // NPCs dentro agora
-    int macas = 0;               // maçãs guardadas (até 300; não estragam)
+    Inventario guardado;         // até 80 kg; nada estraga aqui
 };
 
 // Uma macieira. Ela NUNCA sai da lista (o número dela é usado na memória
@@ -219,15 +324,18 @@ struct Npc {
     Pos destino;
     bool tem_destino = false;
 
-    // --- Carregar (pedido em 14 e 15/11/2026) -----------------------------
-    // Saciado e vendo maçãs, pega as da pilha (até 16 na mão) e leva para o
-    // abrigo dele. Com fome, come primeiro as que carrega, depois as de um
-    // abrigo, depois as do chão.
-    int macas_carregadas = 0;
-    // Comendo: a maçã já saiu de onde estava (mão, abrigo ou chão) e está
-    // "na boca" até terminar os 3 minutos.
+    // --- Inventário (pedido em 14 e 15/11/2026) ----------------------------
+    // Saciado, pega maçãs, ovos e carne do chão (até 8 kg na mão) e leva
+    // para o abrigo dele. Com fome, come primeiro do que carrega, depois de
+    // um abrigo, depois do chão; sem nada disso, caça.
+    Inventario inv;
+    // Comendo: a comida já saiu de onde estava e está "na boca" até acabar.
     bool comendo = false;
     int comendo_de = 0;            // 0 = da mão, 1 = de um abrigo, 2 = do chão
+    int comendo_item = 0;          // 0 maçã, 1 ovo, 2/3/4 carne (pintinho/galinha/galo)
+    int presa = -1;                // animal que está caçando / com quem luta
+    // Macieira lembrada -> até quando ele não volta lá por comida (vazia).
+    std::map<int, double> macieira_vazia_ate;
     // Mais coisas que ele carrega (sem limite, por enquanto).
     int lascas = 0;
     int galhos = 0;
@@ -246,9 +354,6 @@ struct Npc {
     // --- Memória ---------------------------------------------------------
     std::vector<int> macieiras_lembradas;  // índices em Mundo::macieiras()
     std::vector<Pos> aguas_lembradas;      // células de água onde já bebeu
-    // Macieiras lembradas que ele já foi ver nesta busca e estavam sem
-    // maçã. Ele passa para a próxima; ver Mundo::tentar_comer.
-    std::vector<int> macieiras_vistas_vazias;
 };
 
 class Mundo {
@@ -283,7 +388,10 @@ public:
     // Mínima e máxima do dia (média do mundo), mudando aos poucos no ano.
     static void min_max_temperatura(double t, double& minima, double& maxima);
     // Temperatura do mundo agora (°C).
-    double temperatura() const { return temperatura_em(tempo_); }
+    double temperatura() const {
+        if (temp_t_ != tempo_) { temp_valor_ = temperatura_em(tempo_); temp_t_ = tempo_; }
+        return temp_valor_;
+    }
     double temperatura_em(double t) const;
     // O sol está no céu?
     bool sol() const;
@@ -342,6 +450,21 @@ public:
     // acontece logo no próximo avancar.
     void teste_saltar(double t);
     const std::vector<Npc>& npcs() const { return npcs_; }
+    const std::vector<Animal>& animais() const { return animais_; }
+    double idade_dias(const Animal& a) const;
+    double hp_animal(const Animal& a) const;  // HP agora (o guardado é de hp_t)
+    // Ovos: pilhas (x, y, quantos, galinha dona ou -1) e carcaças (x, y, tipo).
+    std::vector<std::array<int, 4>> ovos() const;
+    std::vector<std::array<int, 3>> carnes() const;
+    int ovos_em(int x, int y) const;
+    double ovos_estragam_em(int x, int y) const;  // -1 = com a galinha / não há
+    int animal_em(int x, int y) const;
+    // Coração ❤️: galinhas namorando e casais de NPC juntos no abrigo.
+    std::vector<Pos> coracoes() const;
+    void teste_animal(int id, double fome, double sede, double hp);
+    void teste_idade_animal(int id, double dias);
+    void teste_mover_animal(int id, int x, int y);
+    void teste_inventario(int id, int macas, int ovos, int carne_galinha);
 
 private:
     // --- Criação do mundo -------------------------------------------------
@@ -378,6 +501,51 @@ private:
     // Lugar para uma maçã em volta de `centro`: célula de terra vazia ou
     // pilha com menos de 32. Devolve -1 se não há.
     int lugar_para_maca(Pos centro);
+    int lugar_para_ovo(Pos centro);
+    void por_ovos(int celula, int quantos);
+    // Tira até `quantos` ovos da pilha (um NPC pegando: a dona, se está
+    // chocando, pode defender). Devolve quantos tirou.
+    int tirar_ovos(int celula, int quantos, int npc);
+    void soltar_inventario(Pos onde, Inventario& inv);
+    void por_carcaca(int celula, int tipo);
+    int tirar_carcaca(int celula);              // devolve o item (2, 3 ou 4)
+    int carcaca_na_celula(int celula) const;    // tipo (0, 1, 2) ou -1
+    // Fauna (fauna.cpp)
+    void criar_galinhas();
+    int novo_animal(Sexo sexo, double idade_dias, Pos pos, int mae, int bando);
+    void evento_animal(int id);
+    void evento_animal_nec(int id);
+    void evento_animal_sem_hp(int id);
+    void evento_animal_cresce(int id);
+    void evento_eclosao(int id);
+    void evento_ovos_estragam(int celula);
+    void agendar_passo(Animal& a, double daqui);
+    void atualizar_hp(Animal& a);
+    void recalcular_hp(Animal& a);
+    bool dormindo_agora(const Animal& a) const;
+    bool sem_necessidades(const Animal& a) const;
+    double hp_max(const Animal& a) const;
+    bool passo_animal(Animal& a, Pos alvo, bool fugir = false);
+    // Busca de caminho DENTRO da área de visão até a célula mais perto que
+    // `serve`. 0 = não achou; 1 = já está numa; 2 = deu um passo.
+    // Com `mapa_todo`, procura no mapa inteiro (para ir a um lugar lembrado).
+    int buscar_animal(Animal& a, const std::function<bool(Pos)>& serve, bool mapa_todo = false);
+    void mover_animal(Animal& a, Pos para);
+    bool pode_pisar_animal(const Animal& a, Pos de, Pos para) const;
+    bool explorar_animal(Animal& a, bool livre = false);
+    bool cuidar_necessidades(Animal& a);
+    bool cuidar_bando(Animal& a);
+    bool cuidar_ninho(Animal& a);
+    bool namorar(Animal& a);
+    bool perigo(Animal& a);
+    void sair_do_ninho(Animal& a);
+    void morrer_animal(Animal& a, int causa);
+    void animal_atacado(Animal& a, int npc);
+    void deixar_arisco(Animal& a, int npc);
+    void npc_ferido(Npc& n, double dano, int animal);
+    bool tentar_cacar(Npc& n);
+    bool lutar(Npc& n);
+    int achar_galo(const Animal& a, int lado) const;
 
     // --- Ajudantes --------------------------------------------------------
     bool dentro(Pos p) const {
@@ -395,9 +563,11 @@ private:
         return p;
     }
     bool procurar_maca(const Npc& n, Pos& achada) const;
-    bool procurar_abrigo_com_macas(const Npc& n, int& abrigo) const;
+    bool procurar_abrigo_com_comida(const Npc& n, int& abrigo) const;
+    bool procurar_comida(const Npc& n, Pos& achada, int& tipo, double so_cabe = 0.0) const;
     bool tentar_guardar(Npc& n);
-    void comecar_a_comer(Npc& n, int de);
+    void comecar_a_comer(Npc& n, int de, int item);
+    int atacado_por(const Npc& n) const;   // animal revidando contra ele (-1)
     bool procurar_agua(const Npc& n, Pos& achada) const;
     bool tentar_comer(Npc& n);
     bool tentar_pegar(Npc& n);
@@ -456,6 +626,7 @@ private:
     mutable double marco_temp_ = -1.0;
     // Guardado de ate_critico_frio: quando fica crítico e até quando vale.
     mutable double critico_em_ = 0.0;
+    mutable double temp_t_ = -1e300, temp_valor_ = 0.0;  // última temperatura calculada
     mutable double critico_valido_ate_ = -1.0;
     std::mt19937_64 rng_;
     Mapa3D mapa_;
@@ -488,6 +659,16 @@ private:
     };
     std::priority_queue<Evento, std::vector<Evento>, std::greater<Evento>> fila_;
     std::vector<Npc> npcs_;
+    std::vector<Animal> animais_;
+    std::unordered_map<int, PilhaOvos> ovos_;      // célula -> pilha de ovos
+    std::unordered_map<int, Carcaca> carcacas_;    // id -> carne no chão
+    int proxima_carcaca_ = 0;
+    bool a_subiu_ = false;  // o último passo de animal mudou de nível?
+    // Rascunho da busca de caminho dos animais (reaproveitado; a "marca"
+    // diz quais posições valem nesta busca, sem precisar zerar tudo).
+    std::vector<int> bfs_pai_;
+    std::vector<unsigned> bfs_marca_;
+    unsigned bfs_vez_ = 0;
 };
 
 }  // namespace genesis

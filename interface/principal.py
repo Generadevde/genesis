@@ -54,7 +54,26 @@ SIMBOLO = {
     int(OC.MACIEIRA_SECA): "🌳",  # desenhada em cinza (ver Simbolos.get)
     int(OC.PEDRA): "⬟",
     int(OC.ABRIGO): "🏠",
+    int(OC.OVO): "🥚",
+    int(OC.CARNE): "🍗",           # PROVISÓRIO: carne de animal morto por NPC
+    int(OC.CORPO_ANIMAL): "🐔",    # desenhado em cinza (animal que morreu sozinho)
 }
+# Fauna (pedido do dono do projeto): galinha 🐔, galo 🐓, pintinho 🐤.
+COD_GALINHA, COD_GALO, COD_PINTINHO = 70, 71, 72
+SIMBOLO_ANIMAL = {COD_GALINHA: "🐔", COD_GALO: "🐓", COD_PINTINHO: "🐤"}
+NOME_ANIMAL = {COD_GALINHA: "Galinha", COD_GALO: "Galo", COD_PINTINHO: "Pintinho"}
+EA = gm.EstadoAnimal
+NOME_ESTADO_ANIMAL = {
+    EA.VAGANDO: "explorando", EA.INDO_COMER: "indo para a grama", EA.COMENDO: "ciscando",
+    EA.INDO_BEBER: "indo beber", EA.BEBENDO: "bebendo", EA.DORMINDO: "dormindo",
+    EA.SEGUINDO: "seguindo", EA.NAMORANDO: "namorando", EA.INDO_NINHO: "indo ao ninho",
+    EA.NO_NINHO: "no ninho (pondo)", EA.CHOCANDO: "chocando", EA.FUGINDO: "fugindo",
+    EA.LUTANDO: "lutando", EA.MORTO: "morta",
+}
+NOME_CARNE = ["pintinho", "galinha", "galo"]
+NOME_COMIDA = ["uma maçã", "um ovo", "carne de pintinho", "carne de galinha", "carne de galo"]
+CORACAO = "❤️"
+FRACAO_CORACAO = 0.45  # tamanho do coração em relação à célula — PROVISÓRIO
 # Pessoas (pedido do dono do projeto): homem 🧍, mulher 🧍🏼‍♀️, bebê 👶
 # desenhado com metade do tamanho da célula.
 COD_HOMEM, COD_MULHER, COD_BEBE = 60, 61, 62
@@ -92,7 +111,9 @@ NOME_ESTADO = {
     EST.INDO_PROCRIAR: "indo ao abrigo com o par (procriar)",
     EST.PROCRIANDO: "no abrigo com o par (procriar)",
     EST.BEBE: "bebê",
-    EST.INDO_GUARDAR: "levando maçãs para o abrigo",
+    EST.INDO_GUARDAR: "levando comida para o abrigo",
+    EST.CACANDO: "caçando",
+    EST.LUTANDO: "lutando",
 }
 
 SEXO = gm.Sexo
@@ -107,6 +128,7 @@ CATEGORIA = {
     REG.MUDA_NASCEU: "Plantas", REG.ARVORE_NASCEU: "Plantas",
     REG.ARVORE_SECOU: "Plantas", REG.ARVORE_SUMIU: "Plantas",
     REG.ESTACAO: "Estações", REG.CONGELOU: "Estações", REG.DERRETEU: "Estações",
+    REG.ANIMAL_MORTO: "Trabalho",
 }
 CATEGORIAS = ["Pessoas", "Trabalho", "Plantas", "Estações"]
 
@@ -179,6 +201,8 @@ PRIORIDADE = {
     int(OC.MACIEIRA_SECA): 6, int(OC.MUDA): 5.5,  # PROVISÓRIO
     int(OC.ABRIGO): 8.5, int(OC.PEDRA): 5.6,      # PROVISÓRIO
     COD_HOMEM: 9, COD_MULHER: 9, COD_BEBE: 9,
+    int(OC.ANIMAL): 8.8, int(OC.OVO): 7, int(OC.CARNE): 7.5, int(OC.CORPO_ANIMAL): 7.4,  # PROVISÓRIO
+    COD_GALINHA: 8.8, COD_GALO: 8.8, COD_PINTINHO: 8.8,
     COD_MATERIAL + int(MAT.GRAMA): 5, COD_MATERIAL + int(MAT.NEVE): 5,
     COD_MATERIAL + int(MAT.AREIA): 5,
     COD_MATERIAL + int(MAT.AGUA): 4, COD_MATERIAL + int(MAT.GELO): 4,
@@ -302,11 +326,12 @@ class Genesis:
                 ("Sair", self.sair),
             ]),
         ])
-        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs", "Histórico", "Info"])
+        self.abas = win98.Abas(self.fonte, ["Mapa", "NPCs", "Fauna", "Histórico", "Info"])
 
         self.rodando = True
         self.dialogo = None          # janela "Nova simulação" aberta
         self.rolagem_npcs = 0        # primeira linha mostrada na tabela de NPCs
+        self.rolagem_fauna = 0       # primeira linha da tabela da aba Fauna
         self.rolagem_hist = 0        # primeira linha mostrada no histórico
         self.filtros = {c: True for c in CATEGORIAS}  # PROVISÓRIO: tudo ligado
         self._arraste = None  # clique-e-arraste do mapa em andamento
@@ -341,7 +366,7 @@ class Genesis:
         semente = int.from_bytes(os.urandom(8), "little")
         self.mundo = gm.Mundo(semente, homens, mulheres)
         self.historico = []   # acontecimentos já formatados (aba Histórico)
-        self.rolagem_npcs = self.rolagem_hist = 0
+        self.rolagem_npcs = self.rolagem_hist = self.rolagem_fauna = 0
         self.L, self.H = self.mundo.largura, self.mundo.altura
         # Nível z que se está vendo. Começa no topo dos morros (+4), assim
         # a ilha inteira aparece vista de cima — PROVISÓRIO.
@@ -466,6 +491,16 @@ class Genesis:
         return melhor
 
     @staticmethod
+    def codigo_animal(a) -> int:
+        if a.fase < 2:
+            return COD_PINTINHO
+        return COD_GALO if a.sexo == SEXO.HOMEM else COD_GALINHA
+
+    @staticmethod
+    def nome_animal(a) -> str:
+        return f"{NOME_ANIMAL[Genesis.codigo_animal(a)]} {a.id + 1}"
+
+    @staticmethod
     def codigo_pessoa(n) -> int:
         if n.bebe:
             return COD_BEBE
@@ -496,6 +531,10 @@ class Genesis:
                    if n.estado != EST.MORTO and n.dentro_abrigo < 0}
         # Pilhas de maçãs: quantas em cada célula (para o "xN").
         pilhas = {(x, y): q for x, y, q in self.mundo.pilhas()}
+        ovos = {(x, y): q for x, y, q, _ in self.mundo.ovos()}
+        bichos = {(a.pos.x, a.pos.y): self.codigo_animal(a) for a in self.mundo.animais()
+                  if a.estado != EA.MORTO}
+        coracoes = {(p.x, p.y) for p in self.mundo.coracoes()}
         ox, oy = area.left + 2, area.top + 2
         anterior = self.tela.get_clip()
         self.tela.set_clip(area.inflate(-4, -4))
@@ -509,6 +548,8 @@ class Genesis:
                     cod, onde = self.codigo_bloco(vis, oc, mx, my, lado)
                 if cod == int(OC.NPC):
                     cod = pessoas.get(onde, COD_HOMEM)
+                elif cod == int(OC.ANIMAL):
+                    cod = bichos.get(onde, COD_GALINHA)
                 img = self.imagem(cod, cel)
                 if img is None:
                     continue
@@ -517,6 +558,12 @@ class Genesis:
                 self.tela.blit(img, (px, py))
                 if cod == int(OC.MACA) and pilhas.get(onde, 0) > 1:
                     self.desenhar_pilha(pilhas[onde], ox + i * cel, oy + j * cel, cel)
+                if cod == int(OC.OVO) and ovos.get(onde, 0) > 1:
+                    self.desenhar_pilha(ovos[onde], ox + i * cel, oy + j * cel, cel)
+                if lado == 1 and onde in coracoes:
+                    tam = max(6, int(cel * FRACAO_CORACAO))
+                    c = self.simbolos.get(CORACAO, tam)
+                    self.tela.blit(c, (ox + i * cel + cel - c.get_width(), oy + j * cel))
         # Seleção: moldura branca fina em volta da célula selecionada
         # (PROVISÓRIO, aguardando o dono do projeto).
         alvo = self.posicao_selecao()
@@ -542,12 +589,27 @@ class Genesis:
         self.tela.blit(img, (bx + 1, by))
 
     @staticmethod
-    def texto_carregando(n) -> str:
-        """O que o NPC leva: maçã, lascas, galhos, lenha, machado."""
+    def texto_inventario(v, limite=None) -> str:
+        """Maçãs, ovos e carne, com o peso (kg)."""
         partes = []
-        if n.macas_carregadas:
-            partes.append("1 maçã" if n.macas_carregadas == 1
-                          else f"{n.macas_carregadas} maçãs")
+        if v.macas:
+            partes.append("1 maçã" if v.macas == 1 else f"{v.macas} maçãs")
+        if v.ovos:
+            partes.append("1 ovo" if v.ovos == 1 else f"{v.ovos} ovos")
+        for q, nome in zip(v.carne, NOME_CARNE):
+            if q:
+                partes.append(f"{q} carne de {nome}")
+        texto = ", ".join(partes) if partes else "nada"
+        if limite:
+            texto += f" ({v.peso():.1f}/{limite:.0f} kg)".replace(".", ",")
+        return texto
+
+    @staticmethod
+    def texto_carregando(n) -> str:
+        """O que o NPC leva: inventário, lascas, galhos, lenha, machado."""
+        partes = []
+        if not n.inv.vazio():
+            partes.append(Genesis.texto_inventario(n.inv, gm.INVENTARIO_KG))
         for qtd, um, varios in ((n.lascas, "lasca", "lascas"),
                                 (n.galhos, "galho", "galhos"),
                                 (n.lenha, "lenha", "lenhas")):
@@ -576,8 +638,8 @@ class Genesis:
         """Estado do NPC; indo a um lugar lembrado ganha "(memória)"."""
         texto = NOME_ESTADO[n.estado]
         if n.estado == EST.COMENDO:
-            return ("comendo uma maçã que carregava", "comendo maçã do abrigo",
-                    "comendo maçã do chão")[n.comendo_de]
+            de = ("que carregava", "do abrigo", "do chão")[n.comendo_de]
+            return f"comendo {NOME_COMIDA[n.comendo_item]} {de}"
         if n.pela_memoria and n.estado in (EST.INDO_COMER, EST.INDO_BEBER):
             texto += " (memória)"
         return texto
@@ -587,6 +649,9 @@ class Genesis:
         if cod in SIMBOLO_PESSOA:
             tam = max(1, int(lado * FRACAO_BEBE)) if cod == COD_BEBE else lado
             return self.simbolos.get(SIMBOLO_PESSOA[cod], tam)
+        if cod in SIMBOLO_ANIMAL:
+            tam = max(1, int(lado * FRACAO_BEBE)) if cod == COD_PINTINHO else lado
+            return self.simbolos.get(SIMBOLO_ANIMAL[cod], tam)
         if cod >= COD_MATERIAL:
             simb, cor, _ = MATERIAL[cod - COD_MATERIAL]
             if simb == " ":
@@ -595,7 +660,7 @@ class Genesis:
         cor = {int(OC.CORPO): A.COR_CRUZ, int(OC.MUDA): A.COR_MUDA,
                int(OC.PEDRA): A.COR_PEDRA_ENTIDADE}.get(cod, A.PRETO)
         return self.simbolos.get(SIMBOLO[cod], lado, cor,
-                                 cinza=(cod == int(OC.MACIEIRA_SECA)))
+                                 cinza=cod in (int(OC.MACIEIRA_SECA), int(OC.CORPO_ANIMAL)))
 
     def texto_idade(self, n) -> str:
         anos = int(self.mundo.idade_anos(n) + 1e-9)
@@ -635,6 +700,77 @@ class Genesis:
              "Carregando", "Par"],
             linhas, selecionada=sel, inicio=self.rolagem_npcs)
 
+    # --- Fauna ------------------------------------------------------------
+    def texto_idade_animal(self, a) -> str:
+        dias = int(self.mundo.idade_dias(a))
+        if dias < 365:
+            return f"{dias} dia{'s' if dias != 1 else ''}"
+        anos, resto = divmod(dias, 365)
+        return f"{anos} ano{'s' if anos > 1 else ''} {resto} d"
+
+    def linhas_fauna(self):
+        bichos = self.mundo.animais()
+        linhas = []
+        for a in bichos:
+            if a.fase == 2 and a.sexo == SEXO.HOMEM:
+                bando = "líder"
+            elif a.fase == 2:
+                bando = self.nome_animal(bichos[a.bando]) if a.bando >= 0 else "sozinha"
+            else:
+                bando = ("mãe: " + self.nome_animal(bichos[a.mae])) if a.mae >= 0 else "—"
+            linhas.append([self.nome_animal(a), "galinha (ave)",
+                           "macho" if a.sexo == SEXO.HOMEM else "fêmea",
+                           self.texto_idade_animal(a), f"{self.mundo.hp_animal(a):.0f}",
+                           f"{a.fome:.0f}", f"{a.sede:.0f}", NOME_ESTADO_ANIMAL[a.estado],
+                           f"({a.pos.x}, {a.pos.y}, {a.pos.z:+d})", bando])
+        return linhas
+
+    def desenhar_fauna(self, area: pygame.Rect) -> None:
+        pygame.draw.rect(self.tela, A.CINZA, area)
+        sel = self.selecao[1] if self.selecao and self.selecao[0] == "animal" else None
+        campo = area.inflate(-2 * A.ESPACO, -2 * A.ESPACO)
+        linhas = self.linhas_fauna()
+        cabem = win98.linhas_visiveis(campo, self.fonte)
+        self.rolagem_fauna = max(0, min(self.rolagem_fauna, len(linhas) - cabem))
+        self._linhas_fauna = win98.tabela(
+            self.tela, campo, self.fonte,
+            ["Animal", "Espécie", "Sexo", "Idade", "HP", "Fome", "Sede", "Estado",
+             "Posição", "Bando"],
+            linhas or [["(nenhum)"] + [""] * 9], selecionada=sel, inicio=self.rolagem_fauna)
+
+    def descrever_animal(self, a):
+        cod = self.codigo_animal(a)
+        agora = self.mundo.tempo
+        if a.estado == EA.MORTO:
+            causa = {1: "fome", 2: "sede", 3: "fome e sede", 8: "velhice",
+                     16: "morta por NPC"}.get(a.causa_morte, "?")
+            return SIMBOLO_ANIMAL[cod], None, [f"{self.nome_animal(a)} (morta)",
+                                               f"Causa: {causa}"]
+        bichos = self.mundo.animais()
+        linhas = [self.nome_animal(a),
+                  f"Sexo: {'macho' if a.sexo == SEXO.HOMEM else 'fêmea'}",
+                  f"Idade: {self.texto_idade_animal(a)}",
+                  f"HP: {self.mundo.hp_animal(a):.0f}",
+                  f"Fome: {a.fome:.0f}   Sede: {a.sede:.0f}",
+                  f"Estado: {NOME_ESTADO_ANIMAL[a.estado]}"]
+        if a.fase == 2 and a.sexo == SEXO.MULHER:
+            linhas.append("Bando: " + (self.nome_animal(bichos[a.bando])
+                                       if a.bando >= 0 else "sozinha"))
+            if a.fertil:
+                linhas.append(f"Ninhada: {a.ovos_postos} de {a.ovos_ninhada} ovos")
+            if a.eclosao > 0:
+                linhas.append(f"Nascem em: {relogio_de(a.eclosao)}")
+            if a.pode_por_em > agora:
+                linhas.append(f"Volta a pôr: {relogio_de(a.pode_por_em)}")
+        if a.mae >= 0:
+            linhas.append(f"Mãe: {self.nome_animal(bichos[a.mae])}")
+        if a.arisco_ate > agora:
+            linhas.append(f"Arisca até {relogio_de(a.arisco_ate)}")
+            linhas.append(f"(foge de NPC a {a.dist_fuga} células)")
+        linhas.append(f"Posição: ({a.pos.x}, {a.pos.y}, {a.pos.z:+d})")
+        linhas.append(f"Água lembrada: {len(a.aguas)} ponto(s)")
+        return SIMBOLO_ANIMAL[cod], A.PRETO, linhas
+
     # --- Histórico --------------------------------------------------------
     def texto_registro(self, r) -> str:
         nome = self.nome_de
@@ -672,6 +808,10 @@ class Genesis:
             return f"A macieira em {p} secou"
         if t == REG.ARVORE_SUMIU:
             return f"A macieira seca em {p} sumiu"
+        if t == REG.ANIMAL_MORTO:
+            bicho = "um pintinho" if r.c < 2 else ("um galo" if r.b == int(SEXO.HOMEM)
+                                                    else "uma galinha")
+            return f"{nome(r.a)} matou {bicho} em {p}"
         return str(t)
 
     def atualizar_historico(self) -> None:
@@ -711,6 +851,8 @@ class Genesis:
         """Símbolo, cor e linhas de texto do que está selecionado."""
         if self.selecao is None:
             return None, None, ["Clique em algo no mapa."]
+        if self.selecao[0] == "animal":
+            return self.descrever_animal(self.mundo.animais()[self.selecao[1]])
         if self.selecao[0] == "npc":
             n = self.mundo.npcs()[self.selecao[1]]
             if n.estado == EST.MORTO:
@@ -775,6 +917,23 @@ class Genesis:
                     f"Maçãs: {len(vencem)} (cabem {gm.MACAS_POR_PILHA})", pos,
                     f"A próxima vence em: {duracao(vencem[0])}",
                     "Ao vencer: 40% vira muda,", "60% apodrece"]
+            if o == OC.OVO or self.mundo.ovos_em(x, y) and o == OC.ANIMAL:
+                q = self.mundo.ovos_em(x, y)
+                dona = [d for xx, yy, _, d in self.mundo.ovos() if (xx, yy) == (x, y)]
+                linhas = [f"Ovos: {q}", pos]
+                if dona and dona[0] >= 0:
+                    linhas.append(f"Ninho de {self.nome_animal(self.mundo.animais()[dona[0]])}")
+                falta = self.mundo.ovos_estragam_em(x, y)
+                linhas.append("Com a galinha: não estragam" if falta < 0
+                              else f"Estragam em: {duracao(falta)}")
+                if o == OC.OVO:
+                    return "🥚", A.PRETO, linhas
+            if o == OC.CARNE:
+                tipo = [t for xx, yy, t in self.mundo.carnes() if (xx, yy) == (x, y)]
+                nome = NOME_CARNE[tipo[0]] if tipo else "?"
+                return "🍗", A.PRETO, [f"Carne de {nome}", pos, "Estraga 2 dias depois de morta"]
+            if o == OC.CORPO_ANIMAL:
+                return "🐔", None, ["Galinha morta", pos, "Some em 3 dias"]
             if o == OC.PEDRA:
                 p = self.mundo.pedras()[self.mundo.pedra_em(x, y)]
                 return "⬟", A.COR_PEDRA_ENTIDADE, ["Pedra", pos,
@@ -785,8 +944,8 @@ class Genesis:
                 mor = ", ".join(nomes[i] for i in a.moradores) or "ninguém"
                 den = ", ".join(nomes[i] for i in a.dentro) or "ninguém"
                 return "🏠", A.PRETO, ["Abrigo", pos, f"Moradores: {mor}",
-                                       f"Dentro agora: {den}",
-                                       f"Maçãs guardadas: {a.macas}/{gm.ABRIGO_MACAS_MAX}"]
+                                       f"Dentro agora: {den}", "Guardado:",
+                                       "  " + self.texto_inventario(a.guardado, gm.ABRIGO_KG)]
             if o == OC.MUDA:
                 u = self.mundo.muda_em(x, y)
                 return "♣", A.COR_MUDA, ["Muda", pos,
@@ -809,6 +968,9 @@ class Genesis:
         if self.selecao[0] == "npc":
             n = self.mundo.npcs()[self.selecao[1]]
             return n.pos.x, n.pos.y
+        if self.selecao[0] == "animal":
+            a = self.mundo.animais()[self.selecao[1]]
+            return a.pos.x, a.pos.y
         return self.selecao[1], self.selecao[2]  # (x, y)
 
     def desenhar_painel(self, r: pygame.Rect) -> None:
@@ -927,6 +1089,16 @@ class Genesis:
         if cod == int(OC.MACA):
             q = self.mundo.macas_em(x, y)
             return "Maçã" if q == 1 else f"Maçãs (x{q})"
+        if cod == int(OC.ANIMAL):
+            k = self.mundo.animal_em(x, y)
+            return self.nome_animal(self.mundo.animais()[k]) if k >= 0 else "Animal"
+        if cod == int(OC.OVO):
+            q = self.mundo.ovos_em(x, y)
+            return "Ovo" if q == 1 else f"Ovos (x{q})"
+        if cod == int(OC.CARNE):
+            return "Carne"
+        if cod == int(OC.CORPO_ANIMAL):
+            return "Galinha morta"
         return MATERIAL[cod - COD_MATERIAL][2]
 
     def desenhar_info(self, area: pygame.Rect) -> None:
@@ -947,7 +1119,9 @@ class Genesis:
                 f"{gm.Mundo.min_max_temperatura(self.mundo.tempo)[0]:.1f} °C, máx. "
                 f"{gm.Mundo.min_max_temperatura(self.mundo.tempo)[1]:.1f} °C)",
                 f"Maçãs no chão: {sum(q for _, _, q in self.mundo.pilhas())}",
-                f"Maçãs nos abrigos: {sum(a.macas for a in self.mundo.abrigos())}",
+                f"Nos abrigos: {sum(a.guardado.peso() for a in self.mundo.abrigos()):.1f} kg",
+                f"Galinhas vivas: {sum(a.estado != EA.MORTO for a in self.mundo.animais())}"
+                f"  (ovos no chão: {sum(q for _, _, q, _ in self.mundo.ovos())})",
                 "Calendário: 1 s do jogo = 1 s real (na velocidade normal); "
                 "ano de 365 dias, 12 meses",
             ]),
@@ -961,8 +1135,8 @@ class Genesis:
                 "+ / -  ou  rodinha do mouse — zoom (aproximar / afastar)",
                 "Z / X — descer / subir um nível",
                 "Clique (sem arrastar) — selecionar",
-                "I — trocar de aba (Mapa, NPCs, Histórico, Info)",
-                "Rodinha nas abas NPCs e Histórico — rolar a lista",
+                "I — trocar de aba (Mapa, NPCs, Fauna, Histórico, Info)",
+                "Rodinha nas abas NPCs, Fauna e Histórico — rolar a lista",
                 "Arquivo → Nova simulação — escolher quantos homens e mulheres",
                 "Esc — fechar o menu",
                 "||  >  >>  >>>  >>>>  (barra de baixo) — pausa, normal, "
@@ -997,6 +1171,8 @@ class Genesis:
             self.desenhar_mapa(conteudo)
         elif aba == "NPCs":
             self.desenhar_npcs(conteudo)
+        elif aba == "Fauna":
+            self.desenhar_fauna(conteudo)
         elif aba == "Histórico":
             self.desenhar_historico(conteudo)
         else:
@@ -1074,6 +1250,11 @@ class Genesis:
             if n:
                 self.selecao = ("npc", n.id)
                 return
+        if cod == int(OC.ANIMAL):
+            k = self.mundo.animal_em(x, y)
+            if k >= 0:
+                self.selecao = ("animal", k)
+                return
         self.selecao = ("celula", x, y, z)
 
     def tratar_evento(self, ev) -> None:
@@ -1090,6 +1271,8 @@ class Genesis:
                 self.zoom(-1 if ev.y > 0 else +1)
             elif aba == "NPCs":
                 self.rolagem_npcs = max(0, self.rolagem_npcs - ev.y * A.LINHAS_POR_RODINHA)
+            elif aba == "Fauna":
+                self.rolagem_fauna = max(0, self.rolagem_fauna - ev.y * A.LINHAS_POR_RODINHA)
             elif aba == "Histórico":
                 self.rolagem_hist = max(0, self.rolagem_hist - ev.y * A.LINHAS_POR_RODINHA)
         elif ev.type == pygame.MOUSEMOTION and self._arraste is not None:
@@ -1117,6 +1300,10 @@ class Genesis:
                     for i, r in getattr(self, "_linhas_rects", []):
                         if r.collidepoint(ev.pos):
                             self.selecao = ("npc", i)
+                elif aba == "Fauna":
+                    for i, r in getattr(self, "_linhas_fauna", []):
+                        if r.collidepoint(ev.pos) and i < len(self.mundo.animais()):
+                            self.selecao = ("animal", i)
                 elif aba == "Histórico":
                     for b, cat in getattr(self, "_botoes_filtro", []):
                         if b.collidepoint(ev.pos):

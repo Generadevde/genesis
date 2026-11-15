@@ -23,6 +23,8 @@
 #include <random>
 #include <vector>
 
+#include "config.hpp"
+
 namespace genesis {
 
 enum class Material : std::uint8_t {
@@ -41,11 +43,14 @@ public:
     Mapa3D();
 
     // --- Tamanho ---------------------------------------------------------
-    int largura() const;
-    int altura() const;
-    int z_min() const;
-    int z_max() const;
-    bool dentro(int x, int y, int z) const;
+    int largura() const { return config::LARGURA; }
+    int altura() const { return config::ALTURA; }
+    int z_min() const { return config::Z_MIN; }
+    int z_max() const { return config::Z_MAX; }
+    bool dentro(int x, int y, int z) const {
+        return x >= 0 && y >= 0 && x < largura() && y < altura() &&
+               z >= z_min() && z <= z_max();
+    }
 
     // --- Leitura e escrita de células --------------------------------------
     Material material(int x, int y, int z) const { return mat_[i3(x, y, z)]; }
@@ -55,9 +60,15 @@ public:
     // Superfície da coluna (ver explicação no topo).
     int superficie(int x, int y) const { return sup_[y * largura() + x]; }
     // A coluna é terra firme (o topo é sólido, não água nem gelo)?
-    bool e_terra(int x, int y) const;
+    bool e_terra(int x, int y) const {
+        const Material m = material(x, y, superficie(x, y));
+        return m == Material::Grama || m == Material::Neve || m == Material::Areia ||
+               m == Material::Terra || m == Material::Pedra;
+    }
     // O topo da coluna é gelo?
-    bool e_gelo(int x, int y) const;
+    bool e_gelo(int x, int y) const {
+        return material(x, y, superficie(x, y)) == Material::Gelo;
+    }
     // Gelo (pedido em 15/11/2026): a camada de cima da água das colunas
     // dentro do retângulo [x0, x1) x [y0, y1) congela. O nível da água fica
     // guardado no gelo; ao derreter, volta a ser a mesma água. Devolve as

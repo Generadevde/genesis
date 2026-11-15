@@ -20,32 +20,11 @@ Mapa3D::Mapa3D() {
     sup_.assign(static_cast<size_t>(largura()) * altura(), z_min());
 }
 
-int Mapa3D::largura() const { return cfg::LARGURA; }
-int Mapa3D::altura() const { return cfg::ALTURA; }
-int Mapa3D::z_min() const { return cfg::Z_MIN; }
-int Mapa3D::z_max() const { return cfg::Z_MAX; }
-
-bool Mapa3D::dentro(int x, int y, int z) const {
-    return x >= 0 && y >= 0 && x < largura() && y < altura() &&
-           z >= z_min() && z <= z_max();
-}
-
 void Mapa3D::definir(int x, int y, int z, Material m, int nivel_agua) {
     const int i = i3(x, y, z);
     mat_[i] = m;
     agua_[i] = static_cast<std::uint8_t>(m == Material::Agua ? nivel_agua : 0);
     agua_parada_ = false;  // o mapa mudou: a água pode voltar a se mover
-}
-
-bool Mapa3D::e_terra(int x, int y) const {
-    const int z = superficie(x, y);
-    const Material m = material(x, y, z);
-    return m == Material::Grama || m == Material::Neve || m == Material::Areia ||
-           m == Material::Terra || m == Material::Pedra;
-}
-
-bool Mapa3D::e_gelo(int x, int y) const {
-    return material(x, y, superficie(x, y)) == Material::Gelo;
 }
 
 std::vector<int> Mapa3D::congelar(int x0, int y0, int x1, int y1) {

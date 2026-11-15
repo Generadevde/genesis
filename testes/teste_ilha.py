@@ -484,76 +484,77 @@ def teste_acoes(sementes=6):
 
 
 def teste_macas_npc(sementes=(41, 42, 43)):
-    """Pegar (saciado, até 16, todas da pilha que couberem, na hora), levar
-    ao abrigo (até 300), não pegar com o abrigo cheio, comer na ordem mão →
-    abrigo → chão, e soltar as maçãs ao morrer."""
-    pegou = guardou = 0
+    """Inventário por peso: pega saciado (tudo o que couber: 8 kg; maçã
+    0,5 kg, ovo 1 kg), leva ao abrigo (80 kg), não pega com o abrigo cheio,
+    come na ordem mão → abrigo → chão, solta tudo ao morrer."""
+    pegou = 0
+    guardado = 0.0
     for sem in sementes:
         w = gm.Mundo(sem)
-        # abrigo pronto ao lado de cada um (só no teste)
         for n in w.npcs():
             viz = _vizinha_livre(w, n.pos.x, n.pos.y)
             if viz:
                 w.teste_abrigo(n.id, *viz)
-        antes = {n.id: n.macas_carregadas for n in w.npcs()}
+        antes = {n.id: n.inv.peso() for n in w.npcs()}
         for _ in range(int(6 * H / 5)):
             _alimentar(w)
             w.avancar(5)
             for n in w.npcs():
-                assert 0 <= n.macas_carregadas <= 16
-                if n.macas_carregadas > antes[n.id]:
+                assert 0 <= n.inv.peso() <= 8 + 1e-9
+                if n.inv.peso() > antes[n.id] + 1e-9:
                     pegou += 1
                 if n.estado == E.INDO_GUARDAR:
-                    assert n.macas_carregadas > 0 and n.abrigo_casa >= 0
-                antes[n.id] = n.macas_carregadas
+                    assert not n.inv.vazio() and n.abrigo_casa >= 0
+                antes[n.id] = n.inv.peso()
             for a in w.abrigos():
-                assert 0 <= a.macas <= 300
-        guardou += sum(a.macas for a in w.abrigos())
-    assert pegou > 0 and guardou > 0
-    # abrigo cheio: não pega; se estiver com maçãs, solta no chão perto dele
+                assert 0 <= a.guardado.peso() <= 80 + 1e-9
+        guardado += sum(a.guardado.peso() for a in w.abrigos())
+    assert pegou > 0 and guardado > 0
+    # abrigo cheio (160 maçãs = 80 kg): não pega; o que tem na mão vai pro chão
     w = gm.Mundo(44, 6, 0)
     n0 = w.npcs()[0]
-    viz = _vizinha_livre(w, n0.pos.x, n0.pos.y)
-    a = w.teste_abrigo(0, *viz, macas=300)
+    a = w.teste_abrigo(0, *_vizinha_livre(w, n0.pos.x, n0.pos.y), macas=160)
     w.teste_macas(0, 5)
-    chao0 = sum(q for *_, q in w.pilhas())
     for _ in range(12):
         _alimentar(w)
         w.avancar(5)
-    assert w.npcs()[0].macas_carregadas == 0 and w.abrigos()[a].macas == 300
+    assert w.npcs()[0].inv.vazio() and w.abrigos()[a].guardado.macas == 160
     for _ in range(int(2 * H / 5)):
         _alimentar(w)
         w.avancar(5)
-        assert w.npcs()[0].estado != E.INDO_PEGAR and w.npcs()[0].macas_carregadas == 0
-    # ordem para comer: mão, depois abrigo (só homens: sem casal no abrigo)
+        assert w.npcs()[0].estado != E.INDO_PEGAR and w.npcs()[0].inv.vazio()
+    # ordem para comer: mão, depois abrigo; ovo: 5 min, +30
     w = gm.Mundo(45, 6, 0)
     n0 = w.npcs()[0]
-    viz = _vizinha_livre(w, n0.pos.x, n0.pos.y)
-    a = w.teste_abrigo(0, *viz, macas=10)
-    w.teste_macas(0, 1)
-    w.teste_npc(0, 60, 100, 100)
+    a = w.teste_abrigo(0, *_vizinha_livre(w, n0.pos.x, n0.pos.y), macas=10)
+    w.teste_inventario(0, 0, 1, 0)
+    w.teste_npc(0, 50, 100, 100)
     w.avancar(5)
     n = w.npcs()[0]
-    assert n.estado == E.COMENDO and n.comendo_de == 0 and n.macas_carregadas == 0
-    w.avancar(180)
+    assert n.estado == E.COMENDO and n.comendo_de == 0 and n.comendo_item == 1
+    w.avancar(299)
+    assert w.npcs()[0].estado == E.COMENDO
+    w.avancar(2)
+    assert abs(w.npcs()[0].fome - 80) < 1e-9  # 50 + 30 (sem cair: estava comendo)
     w.teste_npc(0, 60, 100, 100)
     for _ in range(60):
         w.avancar(5)
         n = w.npcs()[0]
         if n.estado == E.COMENDO:
             break
-    assert n.comendo_de == 1 and w.abrigos()[a].macas == 9
-    # morrendo, as maçãs (e a que comia) caem perto do corpo
-    w.teste_macas(0, 3)
-    chao0 = sum(q for *_, q in w.pilhas())
+    assert n.comendo_de == 1 and w.abrigos()[a].guardado.macas == 9
+    # morrendo, solta o inventário (e a comida da boca) perto do corpo
+    w.teste_inventario(0, 3, 2, 0)
+    macas0 = sum(q for *_, q in w.pilhas())
+    ovos0 = sum(q for _, _, q, _ in w.ovos())
     w.teste_npc(0, 100, 0, 0.01)
     w.avancar(1)
-    n = w.npcs()[0]
-    assert n.estado == E.MORTO
-    assert sum(q for *_, q in w.pilhas()) == chao0 + 4  # 3 na mão + a da boca
-    print(f"ok  maçãs: pega saciado (até 16), leva ao abrigo ({guardou} guardadas, "
-          f"máx. 300); abrigo cheio: não pega e solta as da mão; come mão → abrigo; "
-          f"ao morrer, solta as maçãs")
+    assert w.npcs()[0].estado == E.MORTO
+    assert sum(q for *_, q in w.pilhas()) == macas0 + 4   # 3 + a maçã da boca
+    assert sum(q for _, _, q, _ in w.ovos()) == ovos0 + 2
+    print(f"ok  inventário: até 8 kg na mão ({pegou} vezes pegou), abrigo até 80 kg "
+          f"({guardado:.1f} kg guardados); abrigo cheio: não pega e solta; come mão → "
+          f"abrigo; ovo 5 min +30; ao morrer, solta tudo")
 
 
 def teste_memoria(sementes=8):
@@ -564,7 +565,7 @@ def teste_memoria(sementes=8):
         w = gm.Mundo(20000 + s)
         arvores = [m.pos for m in w.macieiras()]
         antes = {n.id: (len(n.macieiras_lembradas), len(n.aguas_lembradas), n.estado,
-                        n.macas_carregadas, n.galhos) for n in w.npcs()}
+                        n.inv.macas, n.galhos) for n in w.npcs()}
         for seg in range(int(3 * H)):
             if seg % 1800 == 0 and seg:   # só no teste: mão vazia e com fome
                 for n in w.npcs():
@@ -582,7 +583,7 @@ def teste_memoria(sementes=8):
                     assert w.material(p.x, p.y, p.z) in (MAT.AGUA, MAT.GELO)
                 if len(ml) > na:
                     comeu_do_chao = n.estado == E.COMENDO and n.comendo_de == 2
-                    assert comeu_do_chao or n.macas_carregadas > c0 or n.galhos > g0
+                    assert comeu_do_chao or n.inv.macas > c0 or n.galhos > g0
                 if len(al) > nag:
                     assert est0 == E.BEBENDO
                 if n.pela_memoria and n.estado == E.INDO_COMER:
@@ -592,7 +593,7 @@ def teste_memoria(sementes=8):
                 if n.pela_memoria and n.estado == E.INDO_BEBER:
                     assert any(p.x == n.alvo.x and p.y == n.alvo.y for p in al)
                     viu_ida_agua += 1
-                antes[n.id] = (len(ml), len(al), n.estado, n.macas_carregadas, n.galhos)
+                antes[n.id] = (len(ml), len(al), n.estado, n.inv.macas, n.galhos)
     assert viu_ida_arvore > 0
     print(f"ok  memória: só aprende onde usou, nunca esquece, volta aos lugares "
           f"lembrados ({viu_ida_arvore} passos indo a macieira lembrada, "
@@ -665,6 +666,7 @@ def _medir_trabalhos(w, dt, ate, vistos, faixas):
     inicio = {}
     antes = {n.id: (n.lascas, n.galhos, n.lenha, n.machado, n.estado, n.tarefa)
              for n in w.npcs()}
+    falta = {n.id: n.falta_acao for n in w.npcs()}
     while w.tempo < ate:
         _alimentar(w)
         w.avancar(dt)
@@ -693,6 +695,12 @@ def _medir_trabalhos(w, dt, ate, vistos, faixas):
                 lo, hi = faixas[fim]
                 assert lo - dt <= dur <= hi + dt, (fim, dur)
                 vistos[fim] += 1
+            # (o que falta subiu = começou outro trabalho sem parar — ex.: a
+            #  árvore dele foi cortada por outro e ele emendou na vizinha)
+            novo = n.estado == E.TRABALHANDO and n.falta_acao > falta[n.id] + 1e-6
+            falta[n.id] = n.falta_acao
+            if novo and not fim and e0 == E.TRABALHANDO:
+                inicio[n.id] = w.tempo
             if n.estado == E.TRABALHANDO and (e0 != E.TRABALHANDO or fim):
                 inicio[n.id] = w.tempo
             if n.estado != E.TRABALHANDO and not fim:
@@ -976,6 +984,312 @@ def teste_agua():
           f"(níveis {sorted(f for f in fundo if f)}), total conservado; mar estável")
 
 
+EA = gm.EstadoAnimal
+
+
+def _vivos(w):
+    return [a for a in w.animais() if a.estado != EA.MORTO]
+
+
+def teste_macieira_vazia():
+    """Bug corrigido: o NPC que chega a uma macieira lembrada sem maçã não
+    volta lá por comida por 2 a 5 dias (antes ficava indo e voltando)."""
+    marcou = 0
+    for sem in (21, 22, 23):
+        w = gm.Mundo(sem)
+        # verão: aprende macieiras (pega maçãs saciado)
+        for _ in range(int(8 * H / 30)):
+            _alimentar(w)
+            w.avancar(30)
+        w.teste_saltar(M.tempo_de(1, 7, 1) + 8 * H)  # inverno: nenhuma maçã
+        for n in w.npcs():
+            w.teste_inventario(n.id, 0, 0, 0)
+        idas = {}
+        while w.tempo < M.tempo_de(1, 7, 3):
+            for n in w.npcs():
+                if n.estado != E.MORTO:
+                    w.teste_npc(n.id, 60, 100, 100)  # com fome, sem morrer
+            w.avancar(5)
+            for n in w.npcs():
+                for arv, ate in n.macieira_vazia_ate.items():
+                    falta = ate - w.tempo
+                    if falta > 0:
+                        assert falta <= 5 * DIA + 1e-6
+                        chave = (n.id, arv)
+                        if chave not in idas:
+                            idas[chave] = ate
+                            assert ate - w.tempo >= 2 * DIA - 10
+                            marcou += 1
+                if n.pela_memoria and n.estado == E.INDO_COMER:
+                    alvo = next(i for i in n.macieiras_lembradas
+                                if w.macieiras()[i].pos.x == n.alvo.x
+                                and w.macieiras()[i].pos.y == n.alvo.y)
+                    assert n.macieira_vazia_ate.get(alvo, -1) <= w.tempo
+    assert marcou > 0
+    print(f"ok  macieira vazia: marcada por 2–5 dias ({marcou} vezes); ninguém "
+          "volta a ela por comida antes disso")
+
+
+def teste_fauna_inicio():
+    """10 galinhas e 2 galos, em 2 bandos (1 galo + 5 galinhas), 91 dias."""
+    w = gm.Mundo(8)
+    bichos = w.animais()
+    galos = [a for a in bichos if a.sexo == gm.Sexo.HOMEM]
+    galinhas = [a for a in bichos if a.sexo == gm.Sexo.MULHER]
+    assert len(galos) == 2 and len(galinhas) == 10
+    for g in galos:
+        assert g.bando == g.id and sum(h.bando == g.id for h in galinhas) == 5
+    for a in bichos:
+        assert a.fase == 2 and abs(w.idade_dias(a) - 91) < 1e-6
+        assert w.hp_animal(a) == (60 if a.sexo == gm.Sexo.HOMEM else 40)
+        assert a.fome == 100 and a.sede == 100
+        assert w.ocupante(a.pos.x, a.pos.y) == O.ANIMAL
+        assert 3 <= a.dist_bando <= 5 and 8 <= a.dist_fuga <= 15
+    w.avancar(599.9)
+    assert all(a.fome == 100 and a.sede == 100 for a in w.animais())
+    w.avancar(0.2)
+    assert all(a.fome == 97 and a.sede == 96 for a in w.animais())
+    print("ok  fauna: 2 bandos (1 galo + 5 galinhas), 91 dias, HP 40/60; "
+          "fome −3 e sede −4 a cada 10 min")
+
+
+def teste_fauna_vida():
+    """Ciscar 10 s (+10), bicar 5 s (+5), andar 6 s, subir 10 s; dorme das
+    19:00 às 05:00 (o bando junto) recuperando HP; segue o galo."""
+    w = gm.Mundo(10, 0, 0)
+    vistos = {"ciscar": 0, "bicar": 0, "passos": 0, "subidas": 0}
+    # (o 1º passo de cada um vem numa hora sorteada: não entra na conta)
+    ant = {a.id: (a.estado, a.fome, a.sede, a.pos, -1e9) for a in w.animais()}
+    mudou_nivel = {}
+    for _ in range(int(10 * H)):
+        w.avancar(1)
+        for a in w.animais():
+            e0, f0, s0, p0, t0 = ant[a.id]
+            if a.estado == EA.MORTO:
+                continue
+            if e0 == EA.COMENDO and a.fome > f0:
+                assert a.fome - f0 in (10, 7) or a.fome == 100
+                vistos["ciscar"] += 1
+            if e0 == EA.BEBENDO and a.sede > s0:
+                assert a.sede - s0 in (5, 1) or a.sede == 100
+                vistos["bicar"] += 1
+            if (a.pos.x, a.pos.y) != (p0.x, p0.y):
+                assert cheb(a.pos, p0) == 1 and abs(a.pos.z - p0.z) <= 1
+                assert w.tempo - t0 >= 6 - 1 - 1e-6
+                vistos["passos"] += 1
+                if a.id in mudou_nivel:
+                    assert w.tempo - mudou_nivel.pop(a.id) >= 10 - 1 - 1e-6
+                    vistos["subidas"] += 1
+                if a.pos.z != p0.z:
+                    mudou_nivel[a.id] = w.tempo
+                ant[a.id] = (a.estado, a.fome, a.sede, a.pos, w.tempo)
+            else:
+                ant[a.id] = (a.estado, a.fome, a.sede, p0, t0)
+    assert all(vistos.values()), vistos
+    # sono: às 19:00 todos dormem; às 05:00 acordam
+    w.avancar(M.tempo_de(1, 1, 1) + 19 * H + 60 - w.tempo)
+    for a in _vivos(w):
+        w.teste_animal(a.id, a.fome, a.sede, 20)
+    w.avancar(60)
+    assert all(a.estado == EA.DORMINDO for a in _vivos(w))
+    w.avancar(60)
+    assert all(abs(w.hp_animal(a) - 30) < 1e-6 for a in _vivos(w)
+               if a.fome > 0 and a.sede > 0)  # +5/min, 2 min
+    w.avancar(M.tempo_de(1, 1, 2) + 5 * H + 30 - w.tempo)
+    assert not any(a.estado == EA.DORMINDO for a in _vivos(w))
+    print(f"ok  fauna: ciscar +10/10 s, bicar +5/5 s, 1 célula a cada 6 s, subir 10 s; "
+          f"dormem 19:00–05:00 recuperando 5 HP/min — {vistos}")
+
+
+def teste_fauna_reproducao():
+    """Namoro 15 min; 12–14 ovos, 1 por dia de manhã, no ninho; choca 21 dias
+    (sem fome/sede); pintinhos (5–20% não prestam) seguem a mãe; 60 dias
+    sozinhos; 90 dias adultos; 3 anos morrem."""
+    w = gm.Mundo(10, 0, 0)  # sem NPCs: ninguém pega os ovos
+    namoros = {}
+    posturas = []
+    chocando = {}
+    nasceram = 0
+    antes = {a.id: (a.estado, a.ovos_postos) for a in w.animais()}
+    while w.tempo < 40 * DIA and nasceram == 0:
+        w.avancar(30)
+        for a in w.animais():
+            e0, p0 = antes.get(a.id, (None, 0))
+            if a.estado == EA.NAMORANDO and e0 != EA.NAMORANDO:
+                namoros[a.id] = w.tempo
+            if e0 == EA.NAMORANDO and a.estado != EA.NAMORANDO and a.sexo == gm.Sexo.MULHER:
+                assert 15 * 60 - 31 <= w.tempo - namoros.pop(a.id) <= 15 * 60 + 31
+                assert a.fertil and 12 <= a.ovos_ninhada <= 14
+            if a.ovos_postos > p0:
+                hora = data(w.tempo)[3]
+                assert 6 <= hora <= 10, hora
+                assert a.ninho >= 0 and w.ovos_em(a.ninho % 128, a.ninho // 128) >= a.ovos_postos
+                posturas.append(a.id)
+            if a.estado == EA.CHOCANDO and e0 != EA.CHOCANDO:
+                assert a.ovos_postos == a.ovos_ninhada
+                chocando[a.id] = (w.tempo, a.fome, a.sede)
+            if a.estado == EA.CHOCANDO:
+                t0, f, sd = chocando[a.id]
+                assert a.fome == f and a.sede == sd  # travadas
+            antes[a.id] = (a.estado, a.ovos_postos)
+        nasceram = sum(1 for a in w.animais() if a.mae >= 0)
+    assert namoros is not None and len(posturas) >= 12 and nasceram > 0
+    mae_id = next(a.mae for a in w.animais() if a.mae >= 0)
+    mae = w.animais()[mae_id]
+    t_choca = chocando[mae_id][0]
+    filhos = [a for a in w.animais() if a.mae == mae_id]
+    assert abs(filhos[0].nascimento - (t_choca + 21 * DIA)) < 31
+    assert len(filhos) <= mae.ovos_ninhada
+    assert all(f.fase == 0 and w.hp_animal(f) == 10 for f in filhos)
+    assert abs(mae.pode_por_em - filhos[0].nascimento - 60 * DIA) < 1
+    # pintinhos com a mãe: sem fome/sede, perto dela
+    for _ in range(int(DIA / 60)):
+        w.avancar(60)
+        m = w.animais()[mae_id]
+        for f in [w.animais()[f.id] for f in filhos]:
+            if f.estado != EA.MORTO and m.estado not in (EA.MORTO,):
+                assert f.fome == 100 and f.sede == 100
+    # 60 dias: sozinhos (fome e sede contam); 90: adultos; 3 anos: morrem
+    f = filhos[0]
+    w.teste_idade_animal(f.id, 60 - 1 / 24)
+    w.avancar(H + 1)
+    assert w.animais()[f.id].fase == 1
+    w.teste_idade_animal(f.id, 90 - 1 / 24)
+    w.avancar(H + 1)
+    f = w.animais()[f.id]
+    if f.estado != EA.MORTO:
+        assert f.fase == 2 and w.hp_animal(f) == (60 if f.sexo == gm.Sexo.HOMEM else 40)
+        if f.sexo == gm.Sexo.HOMEM:
+            assert f.bando == f.id
+    g = _vivos(w)[0]
+    w.teste_idade_animal(g.id, 3 * 365 - 1 / 24)
+    w.avancar(H + 1)
+    g = w.animais()[g.id]
+    assert g.estado == EA.MORTO and g.causa_morte == 8
+    assert w.ocupante(g.pos.x, g.pos.y) == O.CORPO_ANIMAL
+    w.avancar(3 * DIA)
+    assert w.ocupante(g.pos.x, g.pos.y) != O.CORPO_ANIMAL  # some em 3 dias
+    print(f"ok  reprodução: namoro 15 min, {len(posturas)} ovos postos de manhã no ninho, "
+          f"choca 21 dias (fome/sede travadas), {len(filhos)} pintinhos de "
+          f"{mae.ovos_ninhada} ovos; 60 d sozinhos, 90 d adultos, 3 anos morrem; "
+          "corpo some em 3 dias")
+
+
+def teste_ovos_estragam():
+    """Ovo sem contato (galinha ou NPC) por 1 dia estraga."""
+    w = gm.Mundo(45, 1, 0)  # um NPC só: ninguém pega os ovos que ele soltar
+    w.teste_inventario(0, 0, 3, 0)
+    w.teste_npc(0, 100, 0, 0.01)
+    w.avancar(1)
+    pilhas = [(x, y) for x, y, q, d in w.ovos() if d < 0]
+    assert pilhas
+    x, y = pilhas[0]
+    falta = w.ovos_estragam_em(x, y)
+    assert abs(falta - DIA) < 2
+    w.avancar(falta - 1)
+    assert w.ovos_em(x, y) > 0
+    w.avancar(2)
+    assert w.ovos_em(x, y) == 0
+    print("ok  ovos: sem contato por 1 dia, estragam")
+
+
+def teste_caca():
+    """Com fome e sem outra comida, o NPC caça: 10 de dano a cada 5 s; o
+    animal foge (o bando também, ariscos 2 semanas–3 anos) ou revida (galo
+    20%, mãe 80%) até morrer; morto por NPC vira carne (comer: galinha/galo
+    30 min +80; pintinho 5 min +10); a carne estraga em 2 dias no chão."""
+    mortos = lutas = fugas = 0
+    golpes_npc = []
+    for sem in (8, 9):
+        w = gm.Mundo(sem)
+        w.teste_saltar(M.tempo_de(1, 7, 1) + 8 * H)  # inverno: sem maçãs
+        for n in w.npcs():
+            w.teste_inventario(n.id, 0, 0, 0)
+        hp_animal = {a.id: w.hp_animal(a) for a in w.animais()}
+        hp_npc = {n.id: n.hp for n in w.npcs()}
+        while w.tempo < M.tempo_de(1, 7, 3):
+            for n in w.npcs():
+                if n.estado != E.MORTO and n.fome > 60:
+                    w.teste_npc(n.id, 60, 100, n.hp)  # com fome, sem sede
+            w.avancar(1)
+            for a in w.animais():
+                h = w.hp_animal(a)
+                if a.estado == EA.LUTANDO:
+                    lutas += 1
+                    adulto_macho = a.fase == 2 and a.sexo == gm.Sexo.HOMEM
+                    mae = any(f.mae == a.id and f.fase == 0 for f in w.animais())
+                    assert adulto_macho or mae or a.eclosao > 0
+                if a.estado == EA.FUGINDO:
+                    fugas += 1
+                    assert a.arisco_ate > w.tempo
+                    assert 14 * DIA - 1 <= a.arisco_ate - w.tempo + 2 <= 3 * 365 * DIA + 2
+                if a.estado == EA.MORTO and a.causa_morte == 16 and hp_animal[a.id] > 0:
+                    mortos += 1
+                hp_animal[a.id] = h if a.estado != EA.MORTO else 0
+            for n in w.npcs():
+                if n.estado != E.MORTO and n.hp < hp_npc[n.id] - 1e-6:
+                    golpes_npc.append(round(hp_npc[n.id] - n.hp, 3))
+                hp_npc[n.id] = n.hp
+        assert all(r.tipo != R.ANIMAL_MORTO or r.a >= 0 for r in w.historico())
+    assert mortos > 0 and fugas > 0
+    # golpes de animal no NPC: 2 (galinha) ou 2,5 (galo) — (a perda de 5/min
+    # por necessidade crítica, ~0,08 por segundo, fica de fora)
+    golpes = [g for g in golpes_npc if g > 1]
+    assert all(min(abs(g - 2.0), abs(g - 2.5)) < 0.2 for g in golpes), golpes[:10]
+    # carne: comer e estragar
+    w = gm.Mundo(45, 6, 0)
+    w.teste_inventario(0, 0, 0, 1)
+    w.teste_npc(0, 10, 100, 100)
+    w.avancar(5)
+    n = w.npcs()[0]
+    assert n.estado == E.COMENDO and n.comendo_item == 3
+    w.avancar(30 * 60 + 1)
+    assert abs(w.npcs()[0].fome - 90) < 1e-9
+    w = gm.Mundo(45, 1, 0)  # um NPC só: ninguém pega a carne que ele soltar
+    w.teste_inventario(0, 0, 0, 1)
+    w.teste_npc(0, 100, 0, 0.01)
+    w.avancar(1)
+    carnes = w.carnes()
+    assert carnes
+    w.avancar(2 * DIA - 10)
+    assert w.carnes()
+    w.avancar(20)
+    assert not w.carnes()
+    print(f"ok  caça: {mortos} animais mortos por NPCs (carne), {len(golpes)} golpes de "
+          f"animal em NPC, {lutas} instantes de luta "
+          f"(só galo ou mãe), fuga com bando arisco; carne de galinha 30 min +80; "
+          f"carne estraga em 2 dias")
+
+
+def teste_coracao():
+    """❤️ nas galinhas namorando e no abrigo do casal de NPCs procriando."""
+    w = gm.Mundo(10, 0, 0)
+    viu = False
+    while w.tempo < 2 * DIA and not viu:
+        w.avancar(60)
+        nam = [a for a in w.animais() if a.estado == EA.NAMORANDO]
+        if nam:
+            cs = {(p.x, p.y) for p in w.coracoes()}
+            assert all((a.pos.x, a.pos.y) in cs for a in nam)
+            viu = True
+    assert viu
+    print("ok  coração: aparece nas galinhas namorando")
+
+
+def teste_fauna_desempenho():
+    """Depois de 150 dias (com os pintinhos que nasceram), 1 dia do jogo
+    ainda cabe em menos de 1 s."""
+    import time
+    w = gm.Mundo(10, 0, 0)
+    w.avancar(150 * DIA)
+    n = len(_vivos(w))
+    t0 = time.perf_counter()
+    w.avancar(DIA)
+    gasto = time.perf_counter() - t0
+    assert gasto < 1.0, gasto
+    print(f"ok  desempenho: {n} animais vivos, 1 dia em {gasto:.2f} s")
+
+
 if __name__ == "__main__":
     teste_mapa()
     teste_calendario()
@@ -998,4 +1312,12 @@ if __name__ == "__main__":
     teste_agua()
     teste_geral()
     teste_desempenho()
+    teste_macieira_vazia()
+    teste_fauna_inicio()
+    teste_fauna_vida()
+    teste_fauna_reproducao()
+    teste_ovos_estragam()
+    teste_caca()
+    teste_coracao()
+    teste_fauna_desempenho()
     print("TODOS OS TESTES PASSARAM")

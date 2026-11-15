@@ -10,26 +10,14 @@
 
 #include "config.hpp"
 #include "gerador.hpp"
+#include "interno.hpp"
 
 namespace genesis {
 
 namespace cfg = config;
+using namespace interno;
 
 namespace {
-
-// Tipos de acontecimento (na fila).
-enum TipoEvento : int {
-    QUEDA_MACA = 0,      // alvo = número da macieira
-    MACIEIRA_SECA = 1,   // alvo = número da macieira
-    MACIEIRA_SOME = 2,   // alvo = número da macieira
-    MACA_VENCE = 3,      // alvo = número da maçã no chão (6 h)
-    MUDA_VIRA_ARVORE = 4, // alvo = id da muda
-    VIRA_ADULTO = 5,      // alvo = id do bebê
-    VELHICE = 6,          // alvo = id do NPC
-    NASCIMENTO = 7,       // alvo = id da mãe
-    CONCEPCAO = 8,        // alvo = id da mãe (1 h juntos no abrigo)
-    ESTACAO = 9           // alvo = estação que começa (0 verão ... 3 primavera)
-};
 
 // Dia do ano (0 = 1º de janeiro) em que começa cada mês.
 int dia_do_ano(int mes, int dia) {
@@ -52,27 +40,52 @@ double curva_pico(double f) {
 // Passagem suave de 0 a 1 (f de 0 a 1): (1 − cos(π·f)) / 2.
 double curva_passagem(double f) { return (1.0 - std::cos(M_PI * f)) / 2.0; }
 
-// Margem de arredondamento para comparar tempos em ponto flutuante.
-// Não é regra do jogo: só evita que 0.9999999 deixe de contar como "venceu".
-constexpr double EPS = 1e-9;
-
-// Distância "de passos" entre duas células quando se anda em 8 direções:
-// a maior diferença entre colunas ou linhas (distância de Chebyshev).
-int distancia_passos(Pos a, Pos b) {
-    return std::max(std::abs(a.x - b.x), std::abs(a.y - b.y));
+// Comidas (para comer e para o inventário): 0 maçã, 1 ovo, 2 carne de
+// pintinho, 3 de galinha, 4 de galo.
+struct Comida { double fome, sede, duracao_s; };
+Comida comida(int item) {
+    const auto& g = cfg::GALINHA;
+    switch (item) {
+        case 0: return {cfg::MACA_RECUPERA, cfg::MACA_RECUPERA_SEDE, cfg::COMER_DURACAO_S};
+        case 1: return {cfg::OVO_RECUPERA, 0.0, cfg::COMER_OVO_S};
+        case 2: return {g.carne_filhote_ganho, 0.0, g.carne_filhote_s};
+        default: return {g.carne_adulto_ganho, 0.0, g.carne_adulto_s};
+    }
 }
 
-// Distância ao quadrado (em linha reta). Usada só para desempatar.
-int distancia2(Pos a, Pos b) {
-    const int dx = a.x - b.x, dy = a.y - b.y;
-    return dx * dx + dy * dy;
+double peso_item(int item) {
+    const auto& g = cfg::GALINHA;
+    switch (item) {
+        case 0: return cfg::PESO_MACA_KG;
+        case 1: return cfg::PESO_OVO_KG;
+        case 2: return g.peso_filhote;
+        case 3: return g.peso_femea;
+        default: return g.peso_macho;
+    }
 }
 
-// As 8 células vizinhas (inclui diagonais).
-constexpr Pos VIZINHOS[8] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
-                             {1, 0},   {-1, 1}, {0, 1},  {1, 1}};
+int& conta(Inventario& inv, int item) {
+    if (item == 0) return inv.macas;
+    if (item == 1) return inv.ovos;
+    return inv.carne[item - 2];
+}
+
+// Tira 1 item para comer. "Não tem ordem" (dono): fica a ordem dos tipos
+// — maçã, ovo, carne — PROVISÓRIO. Devolve -1 se está vazio.
+int tirar_um(Inventario& inv) {
+    for (int item = 0; item < 5; ++item)
+        if (conta(inv, item) > 0) { conta(inv, item) -= 1; return item; }
+    return -1;
+}
 
 }  // namespace
+
+double Inventario::peso() const {
+    double kg = 0.0;
+    Inventario c = *this;
+    for (int item = 0; item < 5; ++item) kg += conta(c, item) * peso_item(item);
+    return kg;
+}
 
 // ===========================================================================
 // Criação do mundo
@@ -128,6 +141,7 @@ Mundo::Mundo(std::uint64_t semente, int homens, int mulheres) : rng_(semente) {
         npcs_.push_back(n);
     }
     registrar(TipoRegistro::Inicio, homens, mulheres);
+    criar_galinhas();
 
     // Estações: o que vale na estação em que o mundo começa, e o começo de
     // cada uma das próximas (cada uma se reagenda para o ano seguinte).
@@ -345,6 +359,44 @@ void Mundo::avancar(double dt) {
                 case ESTACAO:
                     evento_estacao(e.alvo);
                     break;
+                // --- Fauna (ver fauna.cpp) ---
+                case A_PASSO:
+                    if (animais_[e.alvo].quando_passo == e.quando) evento_animal(e.alvo);
+                    break;
+                case A_NEC:
+                    if (animais_[e.alvo].quando_nec == e.quando) evento_animal_nec(e.alvo);
+                    break;
+                case A_SEM_HP:
+                    if (animais_[e.alvo].quando_sem_hp == e.quando) evento_animal_sem_hp(e.alvo);
+                    break;
+                case A_CRESCE:
+                    evento_animal_cresce(e.alvo);
+                    break;
+                case A_ECLOSAO:
+                    if (animais_[e.alvo].eclosao == e.quando) evento_eclosao(e.alvo);
+                    break;
+                case OVOS_ESTRAGAM: {
+                    auto it = ovos_.find(e.alvo);
+                    if (it != ovos_.end() && !it->second.com_galinha &&
+                        it->second.estraga_em == e.quando)
+                        evento_ovos_estragam(e.alvo);
+                    break;
+                }
+                case CARNE_ESTRAGA: {
+                    auto it = carcacas_.find(e.alvo);
+                    if (it != carcacas_.end() && it->second.estraga == e.quando) {
+                        ocupar(it->second.celula, Ocupante::Nada);
+                        carcacas_.erase(it);
+                    }
+                    break;
+                }
+                case CORPO_SOME: {
+                    Animal& a = animais_[e.alvo];
+                    if (a.corpo >= 0 && ocupacao_[a.corpo] == Ocupante::CorpoAnimal)
+                        ocupar(a.corpo, Ocupante::Nada);
+                    a.corpo = -1;
+                    break;
+                }
                 case CONCEPCAO: {
                     const Npc& m = npcs_[e.alvo];
                     if (m.procriando_desde >= 0.0 &&
@@ -407,6 +459,10 @@ void Mundo::evento_passo(Npc& n) {
     }
     if (n.estado == EstadoNpc::Comendo || n.estado == EstadoNpc::Bebendo)
         return;  // ocupado: fica parado
+
+    // Um animal revidando: ele se defende (bate de volta) — PROVISÓRIO.
+    if (n.estado == EstadoNpc::Trabalhando && atacado_por(n) >= 0) pausar_trabalho(n);
+    if (lutar(n)) return;
 
     const bool com_fome = n.fome < cfg::FOME_LIMITE_COMER;
     const bool com_sede = n.sede < cfg::SEDE_LIMITE_BEBER;
@@ -518,33 +574,34 @@ bool Mundo::sortear_destino(Npc& n) {
     return true;
 }
 
-// A maçã sai de onde estava (mão, abrigo ou chão) e ele come por 3 min.
-void Mundo::comecar_a_comer(Npc& n, int de) {
+// A comida sai de onde estava (mão, abrigo ou chão) e ele come pelo tempo
+// dela (maçã 3 min, ovo 5 min, carne 5 ou 30 min).
+void Mundo::comecar_a_comer(Npc& n, int de, int item) {
     n.estado = EstadoNpc::Comendo;
     n.comendo = true;
     n.comendo_de = de;
+    n.comendo_item = item;
     n.tem_alvo = false;
     n.pela_memoria = false;
-    n.falta_acao = cfg::COMER_DURACAO_S;
+    n.falta_acao = comida(item).duracao_s;
 }
 
-// Com fome (decisão do dono do projeto): come primeiro uma das maçãs que
-// carrega; se não tem, a de um abrigo (qualquer um pode comer de qualquer
-// abrigo); senão, uma do chão; senão, vai a uma macieira lembrada.
-// Devolve falso se não achou nada para comer.
+// Com fome (decisão do dono do projeto): come primeiro do que carrega; se
+// não tem, de um abrigo (qualquer um pode comer de qualquer abrigo); senão,
+// do chão (maçã, ovo ou carne, o que estiver mais perto); senão vai a uma
+// macieira lembrada; sem nenhum recurso, caça.
 bool Mundo::tentar_comer(Npc& n) {
-    if (n.macas_carregadas > 0) {
-        n.macas_carregadas -= 1;
-        comecar_a_comer(n, 0);
+    const int da_mao = tirar_um(n.inv);
+    if (da_mao >= 0) {
+        comecar_a_comer(n, 0, da_mao);
         return true;
     }
     int ab = -1;
-    if (procurar_abrigo_com_macas(n, ab)) {
+    if (procurar_abrigo_com_comida(n, ab)) {
         const Abrigo& a = abrigos_[ab];
         const int desnivel = std::abs(a.pos.z - n.pos.z);
         if (distancia_passos(n.pos, a.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX) {
-            abrigos_[ab].macas -= 1;
-            comecar_a_comer(n, 1);
+            comecar_a_comer(n, 1, tirar_um(abrigos_[ab].guardado));
             return true;
         }
         n.estado = EstadoNpc::IndoComer;
@@ -554,29 +611,39 @@ bool Mundo::tentar_comer(Npc& n) {
         if (passo_em_direcao(n, a.pos)) return true;
         // Sem caminho até o abrigo: tenta o chão.
     }
-    Pos maca;
-    // Primeiro o que ele VÊ agora; se não vê maçã, usa a memória.
-    if (!procurar_maca(n, maca)) return ir_a_macieira_lembrada(n);
-    n.estado = EstadoNpc::IndoComer;
-    n.alvo = maca;
-    n.tem_alvo = true;
-    n.pela_memoria = false;
-    // A pilha ocupa a célula dela, então o NPC come de uma célula vizinha.
-    if (distancia_passos(n.pos, maca) == 1) {
-        const int origem = tirar_maca_do_chao(indice(maca));
-        lembrar_macieira(n, origem);
-        n.macieiras_vistas_vazias.clear();
-        comecar_a_comer(n, 2);
+    Pos onde;
+    int tipo = 0;
+    if (procurar_comida(n, onde, tipo)) {
+        n.estado = EstadoNpc::IndoComer;
+        n.alvo = onde;
+        n.tem_alvo = true;
+        n.pela_memoria = false;
+        // A comida ocupa a célula dela, então o NPC come de uma vizinha.
+        if (distancia_passos(n.pos, onde) == 1) {
+            const int i = indice(onde);
+            int item = 0;
+            if (tipo == 0) {
+                lembrar_macieira(n, tirar_maca_do_chao(i));
+            } else if (tipo == 1) {
+                tirar_ovos(i, 1, n.id);
+                item = 1;
+            } else {
+                item = tirar_carcaca(i);
+            }
+            comecar_a_comer(n, 2, item);
+            return true;
+        }
+        passo_em_direcao(n, onde);
         return true;
     }
-    passo_em_direcao(n, maca);
-    return true;
+    if (ir_a_macieira_lembrada(n)) return true;
+    return tentar_cacar(n);
 }
 
-// O abrigo (com maçãs guardadas) para ir comer: o dele, se tem maçãs; senão
-// o mais perto que ele vê (32 x 32) — PROVISÓRIO.
-bool Mundo::procurar_abrigo_com_macas(const Npc& n, int& abrigo) const {
-    if (n.abrigo_casa >= 0 && abrigos_[n.abrigo_casa].macas > 0) {
+// O abrigo com comida guardada para ir comer: o dele, se tem; senão o mais
+// perto que ele vê (32 x 32) — PROVISÓRIO.
+bool Mundo::procurar_abrigo_com_comida(const Npc& n, int& abrigo) const {
+    if (n.abrigo_casa >= 0 && !abrigos_[n.abrigo_casa].guardado.vazio()) {
         abrigo = n.abrigo_casa;
         return true;
     }
@@ -584,7 +651,7 @@ bool Mundo::procurar_abrigo_com_macas(const Npc& n, int& abrigo) const {
     int melhor_d = -1;
     for (int a = 0; a < static_cast<int>(abrigos_.size()); ++a) {
         const Abrigo& ab = abrigos_[a];
-        if (ab.macas <= 0) continue;
+        if (ab.guardado.vazio()) continue;
         const int dx = ab.pos.x - n.pos.x, dy = ab.pos.y - n.pos.y;
         if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
         const int d = distancia_passos(n.pos, ab.pos);
@@ -593,23 +660,71 @@ bool Mundo::procurar_abrigo_com_macas(const Npc& n, int& abrigo) const {
     return melhor_d >= 0;
 }
 
-// Saciado e vendo maçãs (pedido do dono do projeto): vai até a pilha e, ao
-// lado dela, pega na hora todas que couberem na mão (até 16) — mesmo que
-// sejam menos. Depois leva para o abrigo (ver tentar_guardar). Se o abrigo
-// dele está cheio (300), não pega. Sem abrigo, só carrega.
-// Ao pegar, lembra a macieira de onde cada maçã caiu.
+// Comida no chão à vista (32 x 32), a mais perto: pilha de maçãs (tipo 0),
+// pilha de ovos (1, inclusive o ninho) ou carne (2). Com `so_cabe` > 0,
+// só conta o que cabe nesse peso (para pegar).
+bool Mundo::procurar_comida(const Npc& n, Pos& achada, int& tipo, double so_cabe) const {
+    const int metade = cfg::VISAO_LADO / 2;
+    bool achou = false;
+    int melhor_passos = 0, melhor_d2 = 0;
+    auto considerar = [&](Pos p, int t) {
+        const int ps = distancia_passos(n.pos, p), d2 = distancia2(n.pos, p);
+        if (!achou || ps < melhor_passos || (ps == melhor_passos && d2 < melhor_d2)) {
+            achou = true;
+            achada = com_z(p);
+            tipo = t;
+            melhor_passos = ps;
+            melhor_d2 = d2;
+        }
+    };
+    for (int dy = -metade; dy < metade; ++dy)
+        for (int dx = -metade; dx < metade; ++dx) {
+            Pos p{n.pos.x + dx, n.pos.y + dy};
+            if (!dentro(p)) continue;
+            const Ocupante o = ocupacao_[indice(p)];
+            if (o == Ocupante::Maca && (so_cabe <= 0 || so_cabe >= cfg::PESO_MACA_KG))
+                considerar(p, 0);
+            else if (o == Ocupante::Carne) {
+                const auto it = carcaca_na_celula(indice(p));
+                if (so_cabe <= 0 || so_cabe >= peso_item(2 + it)) considerar(p, 2);
+            }
+        }
+    if (so_cabe <= 0 || so_cabe >= cfg::PESO_OVO_KG)
+        for (const auto& [cel, pilha] : ovos_) {
+            Pos p{cel % largura(), cel / largura()};
+            const int dx = p.x - n.pos.x, dy = p.y - n.pos.y;
+            if (dx < -metade || dx >= metade || dy < -metade || dy >= metade) continue;
+            if (pilha.ovos > 0) considerar(p, 1);
+        }
+    return achou;
+}
+
+// Saciado (pedido do dono do projeto): vai até a comida do chão mais perto
+// e, ao lado dela, pega na hora tudo o que couber no inventário (8 kg). Se o
+// abrigo dele está cheio (80 kg), não pega. Sem abrigo, só carrega.
 bool Mundo::tentar_pegar(Npc& n) {
-    const int cabe = cfg::MACAS_CARREGAVEIS - n.macas_carregadas;
-    if (cabe <= 0) return false;
-    if (n.abrigo_casa >= 0 && abrigos_[n.abrigo_casa].macas >= cfg::ABRIGO_MACAS_MAX)
+    const double cabe = cfg::INVENTARIO_KG - n.inv.peso();
+    if (cabe < cfg::PESO_MACA_KG - 1e-9) return false;
+    if (n.abrigo_casa >= 0 &&
+        abrigos_[n.abrigo_casa].guardado.peso() > cfg::ABRIGO_KG - cfg::PESO_MACA_KG + 1e-9)
         return false;
-    Pos maca;
-    if (!procurar_maca(n, maca)) return false;
-    if (distancia_passos(n.pos, maca) == 1) {
-        const int i = indice(maca);
-        for (int k = 0; k < cabe && !pilha_[i].empty(); ++k) {
-            lembrar_macieira(n, tirar_maca_do_chao(i));
-            n.macas_carregadas += 1;
+    Pos onde;
+    int tipo = 0;
+    if (!procurar_comida(n, onde, tipo, cabe)) return false;
+    if (distancia_passos(n.pos, onde) == 1) {
+        const int i = indice(onde);
+        if (tipo == 0) {
+            while (!pilha_[i].empty() &&
+                   n.inv.peso() + cfg::PESO_MACA_KG <= cfg::INVENTARIO_KG + 1e-9) {
+                lembrar_macieira(n, tirar_maca_do_chao(i));
+                n.inv.macas += 1;
+            }
+        } else if (tipo == 1) {
+            const int livres = static_cast<int>(
+                (cfg::INVENTARIO_KG - n.inv.peso() + 1e-9) / cfg::PESO_OVO_KG);
+            n.inv.ovos += tirar_ovos(i, livres, n.id);
+        } else {
+            conta(n.inv, tirar_carcaca(i)) += 1;
         }
         n.estado = EstadoNpc::Vagando;
         n.tem_alvo = false;
@@ -617,27 +732,28 @@ bool Mundo::tentar_pegar(Npc& n) {
         return true;  // pegar gasta este passo
     }
     n.estado = EstadoNpc::IndoPegar;
-    n.alvo = maca;
+    n.alvo = onde;
     n.tem_alvo = true;
     n.pela_memoria = false;
-    passo_em_direcao(n, maca);
+    passo_em_direcao(n, onde);
     return true;
 }
 
-// Com maçãs na mão e um abrigo: leva para lá. Ao lado do abrigo, guarda na
-// hora as que couberem (até 300); as que não couberem ele deixa no chão
+// Com algo no inventário e um abrigo: leva para lá. Ao lado do abrigo,
+// guarda na hora o que couber (80 kg); o que não couber ele deixa no chão
 // onde está (em volta dele).
 bool Mundo::tentar_guardar(Npc& n) {
-    if (n.macas_carregadas <= 0 || n.abrigo_casa < 0) return false;
+    if (n.inv.vazio() || n.abrigo_casa < 0) return false;
     Abrigo& ab = abrigos_[n.abrigo_casa];
     const int desnivel = std::abs(ab.pos.z - n.pos.z);
     if (distancia_passos(n.pos, ab.pos) == 1 && desnivel <= cfg::NPC_DEGRAU_MAX) {
-        const int guarda = std::min(n.macas_carregadas, cfg::ABRIGO_MACAS_MAX - ab.macas);
-        ab.macas += guarda;
-        n.macas_carregadas -= guarda;
-        while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, -1))
-            n.macas_carregadas -= 1;
-        n.macas_carregadas = 0;  // se nem no chão couber, perdem-se
+        for (int item = 0; item < 5; ++item)
+            while (conta(n.inv, item) > 0 &&
+                   ab.guardado.peso() + peso_item(item) <= cfg::ABRIGO_KG + 1e-9) {
+                conta(n.inv, item) -= 1;
+                conta(ab.guardado, item) += 1;
+            }
+        soltar_inventario(n.pos, n.inv);
         n.estado = EstadoNpc::Vagando;
         n.tem_alvo = false;
         return true;
@@ -647,6 +763,28 @@ bool Mundo::tentar_guardar(Npc& n) {
     n.alvo = ab.pos;
     if (!passo_em_direcao(n, ab.pos)) return false;  // sem caminho: segue a vida
     return true;
+}
+
+// Põe no chão, em volta de `onde`, tudo o que há em `inv` (e o esvazia):
+// maçãs em pilhas, ovos em pilhas, carne cada uma numa célula.
+void Mundo::soltar_inventario(Pos onde, Inventario& inv) {
+    while (inv.macas > 0 && soltar_maca_perto(onde, -1)) inv.macas -= 1;
+    while (inv.ovos > 0) {
+        const int i = lugar_para_ovo(onde);
+        if (i < 0) break;
+        const int cabe = cfg::MACAS_POR_PILHA - (ovos_.count(i) ? ovos_.at(i).ovos : 0);
+        const int poe = std::min(cabe, inv.ovos);
+        por_ovos(i, poe);
+        inv.ovos -= poe;
+    }
+    for (int t = 0; t < 3; ++t)
+        while (inv.carne[t] > 0) {
+            Pos lugar;
+            if (!lugar_livre_perto(onde, lugar)) break;
+            por_carcaca(indice(lugar), t);
+            inv.carne[t] -= 1;
+        }
+    inv = Inventario{};  // o que não coube em lugar nenhum se perde
 }
 
 void Mundo::lembrar_macieira(Npc& n, int arvore) {
@@ -678,28 +816,21 @@ bool Mundo::tentar_beber(Npc& n) {
     return true;
 }
 
-// Com fome e sem maçã à vista: vai até a macieira lembrada mais próxima.
-// Ao chegar ao lado dela, se continua sem ver maçã, marca a macieira como
-// "vista vazia" e passa para a próxima lembrada (decisão do dono do projeto).
-// Quando todas as lembradas estão vazias, esquece a lista de vazias e anda
-// à toa neste passo; no próximo, recomeça pela mais próxima — PROVISÓRIO,
-// aguardando o dono do projeto.
-// Devolve falso se não lembra de nenhuma macieira (ou todas vazias agora).
+// Com fome e sem comida à vista: vai até a macieira lembrada mais próxima.
+// Chegando ao lado dela, se continua sem ver maçã, marca a macieira como
+// VAZIA e não volta lá por comida por 2 a 5 dias (sorteado; pedido do dono
+// em 15/11/2026, corrigindo o vai-e-volta). Passa para a próxima.
+// Devolve falso se não sobra nenhuma macieira lembrada para tentar.
 bool Mundo::ir_a_macieira_lembrada(Npc& n) {
     while (true) {
         int melhor = -1, melhor_d = 0;
         for (int idx : n.macieiras_lembradas) {
-            if (std::find(n.macieiras_vistas_vazias.begin(),
-                          n.macieiras_vistas_vazias.end(),
-                          idx) != n.macieiras_vistas_vazias.end())
-                continue;
+            auto it = n.macieira_vazia_ate.find(idx);
+            if (it != n.macieira_vazia_ate.end() && it->second > tempo_) continue;
             const int d = distancia_passos(n.pos, macieiras_[idx].pos);
             if (melhor < 0 || d < melhor_d) { melhor = idx; melhor_d = d; }
         }
-        if (melhor < 0) {  // nenhuma sobrando
-            n.macieiras_vistas_vazias.clear();
-            return false;
-        }
+        if (melhor < 0) return false;  // nenhuma sobrando
         const Pos arvore = macieiras_[melhor].pos;
         if (melhor_d <= 1) {
             if (!macieiras_[melhor].existe) {
@@ -708,10 +839,11 @@ bool Mundo::ir_a_macieira_lembrada(Npc& n) {
                 n.macieiras_lembradas.erase(
                     std::find(n.macieiras_lembradas.begin(),
                               n.macieiras_lembradas.end(), melhor));
+                n.macieira_vazia_ate.erase(melhor);
                 continue;
             }
-            // Chegou e não há maçã à vista: passa para a próxima.
-            n.macieiras_vistas_vazias.push_back(melhor);
+            n.macieira_vazia_ate[melhor] =
+                tempo_ + sortear(cfg::MACIEIRA_VAZIA_MIN_S, cfg::MACIEIRA_VAZIA_MAX_S);
             continue;
         }
         n.estado = EstadoNpc::IndoComer;
@@ -817,11 +949,12 @@ std::vector<int> Mundo::distancias(Pos de) const {
     return d;
 }
 
-// Terminou os 3 min comendo: a fome sobe 12 e a sede sobe 5 (até 100).
+// Terminou de comer: a fome (e, com maçã, a sede) sobe (até 100).
 void Mundo::evento_fim_comer(Npc& n) {
     n.comendo = false;
-    n.fome = std::min(cfg::FOME_MAXIMA, n.fome + cfg::MACA_RECUPERA);
-    n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + cfg::MACA_RECUPERA_SEDE);
+    const Comida c = comida(n.comendo_item);
+    n.fome = std::min(cfg::FOME_MAXIMA, n.fome + c.fome);
+    n.sede = std::min(cfg::SEDE_MAXIMA, n.sede + c.sede);
     n.estado = EstadoNpc::Vagando;
     n.tem_alvo = false;
 }
@@ -2039,11 +2172,12 @@ void Mundo::mover(Npc& n, Pos destino) {
 // - O par fica livre para formar outro casal; a vaga de morador abre.
 // - Morreu dentro do abrigo: o corpo fica numa célula livre ao lado.
 void Mundo::morrer(Npc& n, int causa_extra) {
-    // A maçã que ele estava comendo cai junto com as que carregava.
+    // A comida que ele estava comendo cai junto com o que carregava.
     if (n.comendo) {
         n.comendo = false;
-        n.macas_carregadas += 1;
+        conta(n.inv, n.comendo_item) += 1;
     }
+    n.presa = -1;
     n.causa_morte = causa_extra;
     n.morreu_em = tempo_;
     if (!n.bebe && n.dentro_abrigo < 0) {
@@ -2074,9 +2208,7 @@ void Mundo::morrer(Npc& n, int causa_extra) {
         if (tem_corpo) n.pos = com_z(fora);
     }
     if (tem_corpo) ocupar(indice(n.pos), Ocupante::Corpo);
-    while (n.macas_carregadas > 0 && soltar_maca_perto(n.pos, -1))
-        n.macas_carregadas -= 1;
-    n.macas_carregadas = 0;
+    soltar_inventario(n.pos, n.inv);
     registrar(TipoRegistro::Morte, n.id, n.causa_morte);
 }
 
@@ -2151,14 +2283,22 @@ void Mundo::teste_idade(int id, double anos) {
     }
 }
 
-void Mundo::teste_macas(int id, int quantas) { npcs_[id].macas_carregadas = quantas; }
+void Mundo::teste_macas(int id, int quantas) { npcs_[id].inv.macas = quantas; }
+
+void Mundo::teste_inventario(int id, int macas, int ovos, int carne_galinha) {
+    Inventario& v = npcs_[id].inv;
+    v = Inventario{};
+    v.macas = macas;
+    v.ovos = ovos;
+    v.carne[1] = carne_galinha;
+}
 
 int Mundo::teste_abrigo(int id, int x, int y, int macas) {
     Pos p{x, y};
     if (!livre(p)) return -1;
     Abrigo ab;
     ab.pos = com_z(p);
-    ab.macas = macas;
+    ab.guardado.macas = macas;
     const int a = static_cast<int>(abrigos_.size());
     abrigos_.push_back(ab);
     ocupar(indice(p), Ocupante::Abrigo);

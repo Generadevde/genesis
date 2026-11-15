@@ -39,7 +39,7 @@ def main() -> None:
             g.tratar_evento(ev)
         g.mundo.avancar(1 / 60)
         # passa por abas, níveis, zoom e menu
-        g.abas.ativa = (passo // 40) % 4  # Mapa, NPCs, Histórico, Info
+        g.abas.ativa = (passo // 40) % 5  # Mapa, NPCs, Fauna, Histórico, Info
         g.z_vista = [4, 2, 0, -5, -11, 4][passo // 40]
         g.nivel_zoom = passo % len(P.ESCALAS)
         g.menu.aberto = 0 if passo % 30 == 0 else None

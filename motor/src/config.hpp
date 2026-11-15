@@ -151,8 +151,23 @@ inline constexpr double AGUA_INTERVALO_S = 5.0;
 // "NPC 2"...; o sexo de cada número é sorteado.
 inline constexpr int HOMENS_PADRAO = 3;
 inline constexpr int MULHERES_PADRAO = 3;
-// Quantas maçãs um NPC consegue carregar.
-inline constexpr int MACAS_CARREGAVEIS = 16;
+// --- Inventário (pedido em 15/11/2026): o que o NPC carrega é medido em
+// PESO, com qualquer mistura. Na mão: até 8 kg; no abrigo: até 80 kg.
+inline constexpr double INVENTARIO_KG = 8.0;
+inline constexpr double ABRIGO_KG = 80.0;
+inline constexpr double PESO_MACA_KG = 0.5;
+inline constexpr double PESO_OVO_KG = 1.0;
+// Ovo: o NPC come em 5 min e recupera 30 de fome (não mexe na sede).
+inline constexpr double OVO_RECUPERA = 30.0;
+inline constexpr double COMER_OVO_S = 5.0 * 60.0;
+// A memória da macieira vazia: chegou e não viu maçã -> não volta lá por
+// comida por 2 a 5 dias (sorteado a cada vez).
+inline constexpr double MACIEIRA_VAZIA_MIN_S = 2.0 * 86400.0;
+inline constexpr double MACIEIRA_VAZIA_MAX_S = 5.0 * 86400.0;
+// Caça: o NPC com fome e sem outra comida mata animais. Dano base 10 por
+// ataque; um ataque a cada 5 s (para todos, por enquanto).
+inline constexpr double NPC_DANO = 10.0;
+inline constexpr double ATAQUE_S = 5.0;
 inline constexpr int NUM_MACIEIRAS = 6;
 
 // --- Fome -----------------------------------------------------------------
@@ -232,11 +247,10 @@ inline constexpr double CORTAR_MIN_S = 2.0 * 3600.0, CORTAR_MAX_S = 6.0 * 3600.0
 inline constexpr int LENHA_POR_ARVORE = 30;
 // Abrigo 🏠: gasta 20 lenhas, leva 2 a 4 dias para construir (na célula onde
 // o NPC está; continua de noite), ocupa a célula, cabe 2 NPCs e dura para
-// sempre. Guarda até 300 maçãs (lá elas não estragam nem viram muda).
+// sempre. Guarda até 80 kg (ver INVENTARIO); lá nada estraga.
 inline constexpr int ABRIGO_LENHA = 20;
 inline constexpr double CONSTRUIR_MIN_S = 2.0 * 86400.0, CONSTRUIR_MAX_S = 4.0 * 86400.0;
 inline constexpr int ABRIGO_VAGAS = 2;
-inline constexpr int ABRIGO_MACAS_MAX = 300;
 
 // Comer uma maçã leva 3 minutos.
 inline constexpr double COMER_DURACAO_S = 3.0 * 60.0;
@@ -253,5 +267,88 @@ inline constexpr int EXPLORAR_DIST_MIN = 2;
 inline constexpr int EXPLORAR_DIST_MAX = 20;
 // Enxerga maçãs e água numa área de 32 x 32 células em volta dele.
 inline constexpr int VISAO_LADO = 32;
+
+// ===========================================================================
+// FAUNA (pedido em 15/11/2026). Cada espécie tem a sua ficha (o "molde"):
+// os mesmos campos para todas, com os valores dela. Hoje só a galinha.
+// ===========================================================================
+struct FichaEspecie {
+    // Fome e sede: 0 a 100; caem `queda` a cada `intervalo_s`.
+    double fome_intervalo_s, fome_queda, sede_intervalo_s, sede_queda;
+    double fome_limite, sede_limite;     // abaixo disso vai comer / beber
+    double comer_s, comer_ganho;         // uma "comida" (galinha: ciscar a grama)
+    double beber_s, beber_ganho;         // um gole (galinha: uma bicada)
+    // Movimento, exploração e visão.
+    double passo_s, subir_s;
+    int degrau_max;
+    int explorar_min, explorar_max;      // distância do destino
+    int visao_lado;                      // área que enxerga (lado do quadrado)
+    // HP de cada fase; dano por necessidade crítica e recuperação dormindo.
+    double hp_filhote, hp_femea, hp_macho;
+    double dano_critico_min, recupera_dormindo_min;
+    // Sono (hora de dormir e de acordar).
+    double dorme_h, acorda_h;
+    // Idade: filhote segue a mãe (sem fome/sede) até `independente_dias`;
+    // vira adulto em `adulto_dias`; morre de velhice em `velhice_anos`.
+    double independente_dias, adulto_dias, velhice_anos;
+    // Bando: os adultos seguem o macho; os filhotes, a mãe. Cada um fica
+    // a uma distância sorteada entre min e max de quem segue. Sozinha, a
+    // fêmea procura um macho numa área de `busca_macho_lado`.
+    int bando_dist_min, bando_dist_max, busca_macho_lado;
+    // Luta e fuga: dano por ataque; chance de revidar (macho; mãe com
+    // filhotes ou chocando); distância de fuga e tempo arisco (sorteados
+    // para cada animal).
+    double dano_filhote, dano_femea, dano_macho;
+    double revida_macho, revida_mae;
+    int fuga_min, fuga_max;
+    double arisco_min_s, arisco_max_s;
+    // Corpo: quem morre sozinho some em `corpo_some_dias`; morto por NPC
+    // vira carne (peso, quanto recupera, quanto tempo leva para comer), que
+    // estraga no chão em `carne_estraga_dias` (na mão e no abrigo, não).
+    double corpo_some_dias, carne_estraga_dias;
+    double peso_filhote, peso_femea, peso_macho;
+    double carne_filhote_ganho, carne_filhote_s, carne_adulto_ganho, carne_adulto_s;
+    // Reprodução (galinha): macho e fêmea juntos `namoro_min`; a fêmea põe
+    // 1 ovo por dia (entre postura_ini_h e postura_fim_h), fica no ninho
+    // `ninho_fica_h`, de ovos_min a ovos_max ovos; depois choca
+    // `chocar_dias`; de falha_min a falha_max dos ovos não prestam; ovo sem
+    // contato estraga em `ovo_estraga_dias`; ela volta a pôr
+    // `volta_a_por_dias` depois de os filhotes nascerem.
+    double namoro_min;
+    double postura_ini_h, postura_fim_h, ninho_fica_h;
+    int ovos_min, ovos_max;
+    double chocar_dias, falha_min, falha_max, ovo_estraga_dias, volta_a_por_dias;
+};
+
+inline constexpr FichaEspecie GALINHA = {
+    /* fome */ 10.0 * 60.0, 3.0, /* sede */ 10.0 * 60.0, 4.0,
+    /* limites (os mesmos do NPC) */ 70.0, 50.0,
+    /* ciscar */ 10.0, 10.0, /* bicada na água */ 5.0, 5.0,
+    /* 0,5 célula por 3 s = 1 célula a cada 6 s; subir 10 s */ 6.0, 10.0, 1,
+    /* explorar */ 1, 7, /* visão */ 16,
+    /* HP */ 10.0, 40.0, 60.0, /* −5/min por crítico, +5/min dormindo */ 5.0, 5.0,
+    /* dorme 19:00 – 05:00 */ 19.0, 5.0,
+    /* pintinho segue a mãe até 60 dias; adulto aos 90; morre com 3 anos */
+    60.0, 90.0, 3.0,
+    /* bando 3 a 5 células; galinha sozinha procura galo em 64 x 64 */ 3, 5, 64,
+    /* dano */ 0.0, 2.0, 2.5, /* revida: galo 20%, mãe 80% */ 0.20, 0.80,
+    /* fuga 8 a 15 células; arisca de 2 semanas a 3 anos */ 8, 15,
+    14.0 * 86400.0, 3.0 * 365.0 * 86400.0,
+    /* corpo some 3 dias; carne estraga 2 dias */ 3.0, 2.0,
+    /* peso: pintinho 1, galinha 4, galo 5 kg */ 1.0, 4.0, 5.0,
+    /* carne: pintinho +10 em 5 min; galinha/galo +80 em 30 min */
+    10.0, 5.0 * 60.0, 80.0, 30.0 * 60.0,
+    /* namoro 15 min */ 15.0,
+    /* põe de manhã (06:00–10:00) e fica 1 h */ 6.0, 10.0, 1.0,
+    /* 12 a 14 ovos */ 12, 14,
+    /* choca 21 dias; 5–20% não prestam; ovo estraga 1 dia; volta 60 dias */
+    21.0, 0.05, 0.20, 1.0, 60.0,
+};
+
+// No começo: 10 galinhas e 2 galos, em 2 bandos (1 galo + 5 galinhas),
+// todos com 91 dias.
+inline constexpr int BANDOS_INICIAIS = 2;
+inline constexpr int GALINHAS_POR_BANDO = 5;
+inline constexpr double IDADE_INICIAL_GALINHA_DIAS = 91.0;
 
 }  // namespace genesis::config

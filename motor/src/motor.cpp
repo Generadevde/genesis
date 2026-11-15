@@ -6,8 +6,8 @@
 namespace genesis {
 
 std::string identificacao() {
-    // Versão 0.12: calendário, estações, gelo (docs/TEMPO.md).
-    return "Genesis — motor 0.12 (calendário e estações)";
+    // Versão 0.13: fauna — galinhas (docs/FAUNA.md).
+    return "Genesis — motor 0.13 (fauna: galinhas)";
 }
 
 }  // namespace genesis

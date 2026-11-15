@@ -60,7 +60,11 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("MUDA", Ocupante::Muda)
         .value("MACIEIRA_SECA", Ocupante::MacieiraSeca)
         .value("PEDRA", Ocupante::Pedra)
-        .value("ABRIGO", Ocupante::Abrigo);
+        .value("ABRIGO", Ocupante::Abrigo)
+        .value("ANIMAL", Ocupante::Animal)
+        .value("OVO", Ocupante::Ovo)
+        .value("CARNE", Ocupante::Carne)
+        .value("CORPO_ANIMAL", Ocupante::CorpoAnimal);
 
     py::enum_<Tarefa>(m, "Tarefa")
         .value("NENHUMA", Tarefa::Nenhuma)
@@ -69,6 +73,65 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("CORTAR", Tarefa::Cortar)
         .value("CONSTRUIR", Tarefa::Construir)
         .value("MACHADO", Tarefa::Machado);
+
+    py::class_<Inventario>(m, "Inventario")
+        .def_readonly("macas", &Inventario::macas)
+        .def_readonly("ovos", &Inventario::ovos)
+        .def_property_readonly("carne", [](const Inventario& v) {
+            return std::vector<int>{v.carne[0], v.carne[1], v.carne[2]};
+        }, "carne de [pintinho, galinha, galo]")
+        .def("peso", &Inventario::peso)
+        .def("vazio", &Inventario::vazio);
+
+    py::enum_<EstadoAnimal>(m, "EstadoAnimal")
+        .value("VAGANDO", EstadoAnimal::Vagando)
+        .value("INDO_COMER", EstadoAnimal::IndoComer)
+        .value("COMENDO", EstadoAnimal::Comendo)
+        .value("INDO_BEBER", EstadoAnimal::IndoBeber)
+        .value("BEBENDO", EstadoAnimal::Bebendo)
+        .value("DORMINDO", EstadoAnimal::Dormindo)
+        .value("SEGUINDO", EstadoAnimal::Seguindo)
+        .value("NAMORANDO", EstadoAnimal::Namorando)
+        .value("INDO_NINHO", EstadoAnimal::IndoNinho)
+        .value("NO_NINHO", EstadoAnimal::NoNinho)
+        .value("CHOCANDO", EstadoAnimal::Chocando)
+        .value("FUGINDO", EstadoAnimal::Fugindo)
+        .value("LUTANDO", EstadoAnimal::Lutando)
+        .value("MORTO", EstadoAnimal::Morto);
+
+    py::class_<Animal>(m, "Animal")
+        .def_readonly("id", &Animal::id)
+        .def_readonly("sexo", &Animal::sexo)
+        .def_readonly("nascimento", &Animal::nascimento)
+        .def_readonly("fase", &Animal::fase)
+        .def_readonly("pos", &Animal::pos)
+        .def_readonly("estado", &Animal::estado)
+        .def_readonly("fome", &Animal::fome)
+        .def_readonly("sede", &Animal::sede)
+        .def_readonly("taxa_hp", &Animal::taxa_hp)
+        .def_readonly("mae", &Animal::mae)
+        .def_readonly("bando", &Animal::bando)
+        .def_readonly("dist_bando", &Animal::dist_bando)
+        .def_readonly("fertil", &Animal::fertil)
+        .def_readonly("ovos_ninhada", &Animal::ovos_ninhada)
+        .def_readonly("ovos_postos", &Animal::ovos_postos)
+        .def_readonly("ninho", &Animal::ninho)
+        .def_readonly("proxima_postura", &Animal::proxima_postura)
+        .def_readonly("eclosao", &Animal::eclosao)
+        .def_readonly("falha", &Animal::falha)
+        .def_readonly("pode_por_em", &Animal::pode_por_em)
+        .def_readonly("namoro_com", &Animal::namoro_com)
+        .def_readonly("namoro_fim", &Animal::namoro_fim)
+        .def_readonly("arisco_ate", &Animal::arisco_ate)
+        .def_readonly("dist_fuga", &Animal::dist_fuga)
+        .def_readonly("lutando_com", &Animal::lutando_com)
+        .def_readonly("fugindo_de", &Animal::fugindo_de)
+        .def_readonly("morreu_em", &Animal::morreu_em)
+        .def_readonly("causa_morte", &Animal::causa_morte)
+        .def_readonly("aguas", &Animal::aguas)
+        .def_readonly("alvo", &Animal::alvo)
+        .def_readonly("quando_passo", &Animal::quando_passo)
+        .def_readonly("destino", &Animal::destino);
 
     py::class_<Pedra>(m, "Pedra")
         .def_readonly("pos", &Pedra::pos)
@@ -79,7 +142,7 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("pos", &Abrigo::pos)
         .def_readonly("moradores", &Abrigo::moradores)
         .def_readonly("dentro", &Abrigo::dentro)
-        .def_readonly("macas", &Abrigo::macas);
+        .def_readonly("guardado", &Abrigo::guardado);
 
     py::enum_<EstadoNpc>(m, "EstadoNpc")
         .value("VAGANDO", EstadoNpc::Vagando)
@@ -96,7 +159,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("INDO_PROCRIAR", EstadoNpc::IndoProcriar)
         .value("PROCRIANDO", EstadoNpc::Procriando)
         .value("BEBE", EstadoNpc::Bebe)
-        .value("INDO_GUARDAR", EstadoNpc::IndoGuardar);
+        .value("INDO_GUARDAR", EstadoNpc::IndoGuardar)
+        .value("CACANDO", EstadoNpc::Cacando)
+        .value("LUTANDO", EstadoNpc::Lutando);
 
     py::enum_<Sexo>(m, "Sexo")
         .value("HOMEM", Sexo::Homem)
@@ -120,7 +185,8 @@ PYBIND11_MODULE(genesis_motor, m) {
         .value("BEBE_PERDIDO", TipoRegistro::BebePerdido)
         .value("ESTACAO", TipoRegistro::Estacao)
         .value("CONGELOU", TipoRegistro::Congelou)
-        .value("DERRETEU", TipoRegistro::Derreteu);
+        .value("DERRETEU", TipoRegistro::Derreteu)
+        .value("ANIMAL_MORTO", TipoRegistro::AnimalMorto);
 
     py::enum_<Estacao>(m, "Estacao")
         .value("VERAO", Estacao::Verao)
@@ -177,7 +243,9 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("morreu_em", &Npc::morreu_em)
         .def_readonly("quando_velhice", &Npc::quando_velhice)
         .def_readonly("quando_adulto", &Npc::quando_adulto)
-        .def_readonly("macas_carregadas", &Npc::macas_carregadas)
+        .def_readonly("inv", &Npc::inv)
+        .def_readonly("comendo_item", &Npc::comendo_item)
+        .def_readonly("presa", &Npc::presa)
         .def_readonly("comendo", &Npc::comendo)
         .def_readonly("comendo_de", &Npc::comendo_de)
         .def_readonly("lascas", &Npc::lascas)
@@ -202,6 +270,7 @@ PYBIND11_MODULE(genesis_motor, m) {
         .def_readonly("tem_destino", &Npc::tem_destino)
         .def_readonly("alvo", &Npc::alvo)
         .def_readonly("macieiras_lembradas", &Npc::macieiras_lembradas)
+        .def_readonly("macieira_vazia_ate", &Npc::macieira_vazia_ate)
         .def_readonly("aguas_lembradas", &Npc::aguas_lembradas);
 
     m.attr("SEGUNDOS_POR_HORA") = config::SEGUNDOS_POR_HORA;
@@ -212,8 +281,8 @@ PYBIND11_MODULE(genesis_motor, m) {
     m.attr("SEGUNDOS_POR_ANO") = config::SEGUNDOS_POR_ANO;
     m.attr("SEGUNDOS_POR_MINUTO") = config::SEGUNDOS_POR_MINUTO;
     m.attr("HORA_INICIAL") = config::HORA_INICIAL;
-    m.attr("MACAS_CARREGAVEIS") = config::MACAS_CARREGAVEIS;
-    m.attr("ABRIGO_MACAS_MAX") = config::ABRIGO_MACAS_MAX;
+    m.attr("INVENTARIO_KG") = config::INVENTARIO_KG;
+    m.attr("ABRIGO_KG") = config::ABRIGO_KG;
     m.attr("MACAS_POR_PILHA") = config::MACAS_POR_PILHA;
     m.attr("FOME_INTERVALO_S") = config::FOME_INTERVALO_S;
     m.attr("SEDE_INTERVALO_S") = config::SEDE_INTERVALO_S;
@@ -296,6 +365,23 @@ PYBIND11_MODULE(genesis_motor, m) {
         }, py::arg("desde") = 0,
            "Acontecimentos importantes a partir do número `desde`.")
         .def("abrigos", &Mundo::abrigos)
+        .def("animais", &Mundo::animais)
+        .def("idade_dias", &Mundo::idade_dias, py::arg("animal"))
+        .def("hp_animal", &Mundo::hp_animal, py::arg("animal"))
+        .def("ovos", &Mundo::ovos, "Pilhas de ovos: (x, y, quantos, galinha dona ou -1).")
+        .def("carnes", &Mundo::carnes, "Carne no chão: (x, y, tipo 0 pintinho/1 galinha/2 galo).")
+        .def("ovos_em", &Mundo::ovos_em, py::arg("x"), py::arg("y"))
+        .def("ovos_estragam_em", &Mundo::ovos_estragam_em, py::arg("x"), py::arg("y"))
+        .def("animal_em", &Mundo::animal_em, py::arg("x"), py::arg("y"))
+        .def("coracoes", &Mundo::coracoes)
+        .def("teste_animal", &Mundo::teste_animal, py::arg("id"), py::arg("fome"),
+             py::arg("sede"), py::arg("hp"), "SÓ PARA TESTES.")
+        .def("teste_idade_animal", &Mundo::teste_idade_animal, py::arg("id"),
+             py::arg("dias"), "SÓ PARA TESTES.")
+        .def("teste_mover_animal", &Mundo::teste_mover_animal, py::arg("id"),
+             py::arg("x"), py::arg("y"), "SÓ PARA TESTES.")
+        .def("teste_inventario", &Mundo::teste_inventario, py::arg("id"), py::arg("macas"),
+             py::arg("ovos"), py::arg("carne_galinha"), "SÓ PARA TESTES.")
         .def("pedra_em", &Mundo::pedra_em, py::arg("x"), py::arg("y"))
         .def("abrigo_em", &Mundo::abrigo_em, py::arg("x"), py::arg("y"))
         .def("teste_npc", &Mundo::teste_npc, py::arg("id"), py::arg("fome"),

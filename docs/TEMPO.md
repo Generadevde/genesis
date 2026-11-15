@@ -117,6 +117,8 @@ nasce em 10/12).
 - Cada maçã tem as **suas** 6 horas (estão juntas, mas são separadas).
 
 ## Maçãs, NPCs e abrigo (detalhes em [CARREGAR.md](CARREGAR.md))
+
+> Desde o motor 0.13 o limite é por **peso**: 8 kg na mão e 80 kg no abrigo (ver [FAUNA.md](FAUNA.md)).
 - Saciado, o NPC pega **todas** as maçãs da pilha que couberem na mão
   (**até 16**), na hora, e **leva para o abrigo** dele (guardar é na hora).
 - O abrigo guarda **até 300** maçãs; lá (e na mão) elas **não estragam**.

@@ -1,5 +1,7 @@
 # Nomes e primeiro comportamento: carregar maçã (motor 0.5)
 
+> **Mudou de novo em 15/11/2026 (motor 0.13):** o que o NPC carrega virou um **inventário por peso** (8 kg na mão, 80 kg no abrigo; maçã 0,5 kg, ovo 1 kg, galinha 4 kg, galo 5 kg, pintinho 1 kg) — ver [FAUNA.md](FAUNA.md).
+
 > **Mudou em 15/11/2026 (motor 0.12):** o NPC carrega **até 16 maçãs**; saciado, pega todas as da pilha que couberem e **leva para o abrigo** dele (até 300 lá; no abrigo e na mão não estragam); abrigo cheio: deixa as da mão no chão e não pega mais. Com fome come **da mão → de um abrigo → do chão**. Ver [TEMPO.md](TEMPO.md).
 
 Pedido pelo dono do projeto em 14/11/2026.

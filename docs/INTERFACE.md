@@ -140,6 +140,11 @@ isso (`mundo.avancar(dt)`). 60 quadros por segundo = taxa do monitor do dono.
 - Aba Info: data, nascer/pôr do sol, velocidade, mínima/máxima do dia,
   maçãs no chão e nos abrigos.
 
+### Fauna (motor 0.13)
+- Aba **Fauna** (tabela dos animais), símbolos 🐔 🐓 🐤 🥚 🍗, ❤️ no namoro e
+  no abrigo do casal procriando; inventário em kg nos painéis — ver
+  [FAUNA.md](FAUNA.md).
+
 ## Valores PROVISÓRIOS (aguardando o dono do projeto)
 
 Estão em `interface/aparencia.py`:
